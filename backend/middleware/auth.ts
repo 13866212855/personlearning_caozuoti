@@ -3,30 +3,54 @@ import jwt from 'jsonwebtoken';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { APP_CONFIG } from '../config';
 import { getDb } from '../db';
+import type { UserRole } from '../types';
 
-export interface StudentJwtPayload {
+export interface PortalJwtPayload {
   sub: string;
   username: string;
-  role: 'student';
+  role: 'teacher' | 'student';
 }
 
 export interface AdminJwtPayload {
   sub: string;
   username: string;
-  role: 'admin';
+  role: 'super_admin';
+}
+
+export interface PortalUser {
+  id: string;
+  username: string;
+  role: 'teacher' | 'student';
+  realName: string;
+  grade: string;
+  className: string;
+  studentNo: string;
+  teacherId: string;
+  classId: string;
+  mustChangePassword: boolean;
 }
 
 export interface AuthedRequest extends Request {
+  user?: PortalUser;
   student?: {
     id: string;
     username: string;
     realName: string;
     grade: string;
     className: string;
+    studentNo: string;
+    teacherId: string;
+    classId: string;
+  };
+  teacher?: {
+    id: string;
+    username: string;
+    realName: string;
   };
   admin?: {
     id: string;
     username: string;
+    role: 'super_admin';
   };
 }
 
@@ -34,7 +58,9 @@ function extractClientIp(req: Request): string {
   const forwarded = req.headers.forwarded;
   const rawForwarded = Array.isArray(forwarded) ? forwarded[0] : forwarded;
   if (rawForwarded) {
-    const match = rawForwarded.match(/for=(?:"?\[([^\]]+)\](?::\d+)?"?|"([^";,\s]+)"|([^;,\s]+))/i);
+    const match = rawForwarded.match(
+      /for=(?:"?\[([^\]]+)\](?::\d+)?"?|"([^";,\s]+)"|([^;,\s]+))/i
+    );
     let candidate = (match?.[1] || match?.[2] || match?.[3] || '').trim();
     if (candidate) {
       if (/^\d{1,3}(?:\.\d{1,3}){3}:\d+$/.test(candidate)) {
@@ -51,14 +77,14 @@ function extractClientIp(req: Request): string {
 
 export const loginRateLimiter = rateLimit({
   windowMs: 10 * 60 * 1000, // 10 minutes
-  max: 20,
+  max: 25,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => extractClientIp(req),
   message: { error: '登录尝试过于频繁，请 10 分钟后再试' },
 });
 
-export function signStudentToken(payload: StudentJwtPayload): string {
+export function signPortalToken(payload: PortalJwtPayload): string {
   return jwt.sign(payload, APP_CONFIG.studentJwtSecret, { expiresIn: '7d' });
 }
 
@@ -66,63 +92,133 @@ export function signAdminToken(payload: AdminJwtPayload): string {
   return jwt.sign(payload, APP_CONFIG.adminJwtSecret, { expiresIn: '12h' });
 }
 
-export function requireStudentAuth(
+interface UserDbRow {
+  id: string;
+  username: string;
+  role: UserRole;
+  real_name: string;
+  grade: string;
+  class_name: string;
+  student_no: string;
+  teacher_id: string;
+  class_id: string;
+  is_disabled: number;
+  must_change_password: number;
+}
+
+function verifyPortalUser(
   req: AuthedRequest,
   res: Response,
-  next: NextFunction
-) {
+  allowedRoles: Array<'teacher' | 'student'>
+): PortalUser | null {
   const authHeader = req.headers.authorization || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
   if (!token) {
-    res.status(401).json({ error: '请先登录学生账号' });
-    return;
+    res.status(401).json({ error: '请先登录账号' });
+    return null;
   }
 
   try {
     const decoded = jwt.verify(
       token,
       APP_CONFIG.studentJwtSecret
-    ) as StudentJwtPayload;
-    if (decoded.role !== 'student') {
-      res.status(403).json({ error: '无效的学生身份凭证' });
-      return;
+    ) as PortalJwtPayload;
+    if (decoded.role !== 'teacher' && decoded.role !== 'student') {
+      res.status(403).json({ error: '权限不足' });
+      return null;
     }
 
     const db = getDb();
-    const student = db
+    const row = db
       .prepare(
-        'SELECT id, username, real_name, grade, class_name, is_disabled FROM students WHERE id = ?'
+        `SELECT id, username, role, real_name, grade, class_name, student_no,
+                teacher_id, class_id, is_disabled, must_change_password
+         FROM users WHERE id = ?`
       )
-      .get(decoded.sub) as
-      | {
-          id: string;
-          username: string;
-          real_name: string;
-          grade: string;
-          class_name: string;
-          is_disabled: number;
-        }
-      | undefined;
+      .get(decoded.sub) as UserDbRow | undefined;
 
-    if (!student) {
+    if (!row) {
       res.status(401).json({ error: '账号不存在，请重新登录' });
-      return;
+      return null;
     }
-    if (student.is_disabled) {
-      res.status(403).json({ error: '该学生账号已被禁用，请联系老师' });
-      return;
+    if (row.role === 'super_admin') {
+      res.status(403).json({ error: '权限不足' });
+      return null;
+    }
+    if (row.is_disabled) {
+      res.status(403).json({ error: '该账号已被禁用，请联系管理员或任课教师' });
+      return null;
+    }
+    if (!allowedRoles.includes(row.role)) {
+      res.status(403).json({ error: '无权访问该角色功能' });
+      return null;
     }
 
-    req.student = {
-      id: student.id,
-      username: student.username,
-      realName: student.real_name,
-      grade: student.grade,
-      className: student.class_name,
+    const user: PortalUser = {
+      id: row.id,
+      username: row.username,
+      role: row.role,
+      realName: row.real_name,
+      grade: row.grade,
+      className: row.class_name,
+      studentNo: row.student_no,
+      teacherId: row.teacher_id || '',
+      classId: row.class_id || '',
+      mustChangePassword: Boolean(row.must_change_password),
     };
-    next();
+    req.user = user;
+    if (row.role === 'student') {
+      req.student = {
+        id: row.id,
+        username: row.username,
+        realName: row.real_name,
+        grade: row.grade,
+        className: row.class_name,
+        studentNo: row.student_no,
+        teacherId: row.teacher_id || '',
+        classId: row.class_id || '',
+      };
+    } else if (row.role === 'teacher') {
+      req.teacher = {
+        id: row.id,
+        username: row.username,
+        realName: row.real_name,
+      };
+    }
+    return user;
   } catch {
     res.status(401).json({ error: '登录已过期，请重新登录' });
+    return null;
+  }
+}
+
+export function requirePortalAuth(
+  req: AuthedRequest,
+  res: Response,
+  next: NextFunction
+) {
+  if (verifyPortalUser(req, res, ['teacher', 'student'])) {
+    next();
+  }
+}
+
+export function requireStudentAuth(
+  req: AuthedRequest,
+  res: Response,
+  next: NextFunction
+) {
+  if (verifyPortalUser(req, res, ['student'])) {
+    next();
+  }
+}
+
+export function requireTeacherAuth(
+  req: AuthedRequest,
+  res: Response,
+  next: NextFunction
+) {
+  if (verifyPortalUser(req, res, ['teacher'])) {
+    next();
   }
 }
 
@@ -134,7 +230,7 @@ export function requireAdminAuth(
   const authHeader = req.headers.authorization || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
   if (!token) {
-    res.status(401).json({ error: '请先登录管理员账号' });
+    res.status(401).json({ error: '请先登录超级管理员账号' });
     return;
   }
 
@@ -143,22 +239,30 @@ export function requireAdminAuth(
       token,
       APP_CONFIG.adminJwtSecret
     ) as AdminJwtPayload;
-    if (decoded.role !== 'admin') {
+    if (decoded.role !== 'super_admin') {
       res.status(403).json({ error: '权限不足' });
       return;
     }
 
     const db = getDb();
     const admin = db
-      .prepare('SELECT id, username FROM admins WHERE id = ?')
-      .get(decoded.sub) as { id: string; username: string } | undefined;
+      .prepare(
+        "SELECT id, username, role, is_disabled FROM users WHERE id = ? AND role = 'super_admin'"
+      )
+      .get(decoded.sub) as
+      | { id: string; username: string; role: string; is_disabled: number }
+      | undefined;
 
     if (!admin) {
       res.status(401).json({ error: '管理员凭证无效' });
       return;
     }
+    if (admin.is_disabled) {
+      res.status(403).json({ error: '该管理员账号已被禁用' });
+      return;
+    }
 
-    req.admin = { id: admin.id, username: admin.username };
+    req.admin = { id: admin.id, username: admin.username, role: 'super_admin' };
     next();
   } catch {
     res.status(401).json({ error: '管理员登录已过期，请重新登录' });

@@ -9,6 +9,7 @@ import type {
   Question,
   QuestionStatus,
   QuestionType,
+  QuestionVisibility,
 } from '../types';
 
 export interface LlmConfigRow {
@@ -20,6 +21,7 @@ export interface LlmConfigRow {
   temperature: number;
   max_tokens: number;
   timeout_ms: number;
+  teacher_daily_ai_limit: number;
   updated_at: string;
 }
 
@@ -29,6 +31,44 @@ export function getLlmConfig(): LlmConfigRow {
     .prepare('SELECT * FROM llm_configs WHERE id = 1')
     .get() as LlmConfigRow;
   return row;
+}
+
+export function getTeacherTodayAiUsage(teacherId: string): {
+  used: number;
+  limit: number;
+} {
+  const db = getDb();
+  const cfg = getLlmConfig();
+  const todayPrefix = new Date().toISOString().slice(0, 10);
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(count), 0) as total
+       FROM ai_generation_logs
+       WHERE user_id = ? AND created_at LIKE ?`
+    )
+    .get(teacherId, `${todayPrefix}%`) as { total: number };
+  return {
+    used: Number(row?.total || 0),
+    limit: Number(cfg.teacher_daily_ai_limit || 30),
+  };
+}
+
+export function recordAiGenerationUsage(
+  userId: string,
+  role: string,
+  count: number
+) {
+  const db = getDb();
+  db.prepare(
+    `INSERT INTO ai_generation_logs (id, user_id, role, count, created_at)
+     VALUES (?, ?, ?, ?, ?)`
+  ).run(
+    `aiu-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    userId,
+    role,
+    count,
+    new Date().toISOString()
+  );
 }
 
 function extractJsonBlock(raw: string): string {
@@ -77,8 +117,8 @@ const GeneratedQuestionSchema = z.object({
       .optional(),
     initialState: z.record(z.string(), z.unknown()),
   }),
-  steps: z.array(StepSchema).min(3).max(8),
-  checkpoints: z.array(CheckpointSchema).min(3),
+  steps: z.array(StepSchema).min(2).max(10),
+  checkpoints: z.array(CheckpointSchema).min(2),
   referenceAnswer: z.record(z.string(), z.unknown()),
   analysis: z.array(z.string()).min(1),
   commonMistakes: z.array(z.string()).default([]),
@@ -224,11 +264,25 @@ export async function callImageGenerations(
   throw new Error('图片接口返回缺少 url 或 b64_json');
 }
 
-function buildQuestionPrompt(
-  type: QuestionType,
-  difficulty: DifficultyLevel,
-  knowledgePoint?: string
-): string {
+function buildQuestionPrompt(options: {
+  type: QuestionType;
+  difficulty: DifficultyLevel;
+  knowledgePoints?: string[];
+  customPrompt?: string;
+  stepCount?: number;
+  totalScore?: number;
+  needsImage?: boolean;
+}): string {
+  const {
+    type,
+    difficulty,
+    knowledgePoints,
+    customPrompt,
+    stepCount = 4,
+    totalScore = 100,
+    needsImage,
+  } = options;
+
   const typeSpecs: Record<QuestionType, string> = {
     word: `题型：Word 文字处理。
 initialState 与 referenceAnswer 的 JSON 结构必须严格为：
@@ -291,29 +345,62 @@ initialState 与 referenceAnswer 的 JSON 结构必须严格为：
 - "file_not_exists": { "path": "D:/旧文件.tmp" }`,
   };
 
+  const kpLine =
+    knowledgePoints && knowledgePoints.length > 0
+      ? `重点考查知识点：${knowledgePoints.join('、')}。`
+      : '';
+  const customLine = customPrompt?.trim()
+    ? `教师教学定制要求：${customPrompt.trim()}。`
+    : '';
+  const imageLine =
+    needsImage === true && (type === 'word' || type === 'web')
+      ? '本题需要配图：请填写 "needsImagePrompt"（简洁的英文或中文图像描述），并在初始素材与参考答案中使用 "/api/seed-assets/heritage.svg" 作为图片引用占位路径。'
+      : needsImage === false
+        ? '本题无需配图，请将 "needsImagePrompt" 设为 null。'
+        : '如果题目需要配图（如 Word 插图或网页 img 图片），可填写 "needsImagePrompt"，否则设为 null；在没有自定义生成图片前，先用 "/api/seed-assets/heritage.svg" 作为占位路径。';
+
   return `你是一名中国高中信息技术学业水平考试（会考）命题专家。请严格生成 1 道符合高中会考难度与风格的操作题。
 要求：
-1. 难度：${difficulty}。${knowledgePoint ? `重点考查知识点：${knowledgePoint}。` : ''}
-2. 步骤数量：3~6 步，每一步任务明确、无歧义、可被程序确定性判定。
-3. 所有 checkpoints 的 score 之和必须严格等于 totalScore（100）。
+1. 难度：${difficulty}。${kpLine}${customLine}
+2. 步骤数量：${Math.max(3, Math.min(8, stepCount))} 步，每一步任务明确、无歧义、可被程序确定性判定。
+3. 所有 checkpoints 的 score 之和必须严格等于 totalScore（${totalScore}）。
 4. referenceAnswer 必须与 initialState 同结构，且必须 100% 通过你给出的所有 checkpoints 判分规则。
 5. ${typeSpecs[type]}
-6. 如果题目需要配图（如 Word 插图或网页 img 图片），可填写 "needsImagePrompt"（英文或中文绘画描述），否则设为 null；在没有自定义生成图片前，先用 "/api/seed-assets/heritage.svg" 作为占位路径。
+6. ${imageLine}
 7. 必须只输出一个合法 JSON 对象，不要输出任何额外说明或 markdown 以外的内容。JSON 顶层字段为：
-title, knowledgePoints, scenario, totalScore(100), materials({description, initialState}), steps([{index, instruction, score, hint}]), checkpoints([{id, stepIndex, description, score, ruleType, params}]), referenceAnswer, analysis([string]), commonMistakes([string]), needsImagePrompt。`;
+title, knowledgePoints, scenario, totalScore(${totalScore}), materials({description, initialState}), steps([{index, instruction, score, hint}]), checkpoints([{id, stepIndex, description, score, ruleType, params}]), referenceAnswer, analysis([string]), commonMistakes([string]), needsImagePrompt。`;
 }
 
 export async function generateQuestionWithAi(params: {
   type: QuestionType;
   difficulty: DifficultyLevel;
   knowledgePoint?: string;
+  knowledgePoints?: string[];
+  knowledgePointIds?: string[];
+  customPrompt?: string;
+  stepCount?: number;
+  totalScore?: number;
+  needsImage?: boolean;
   status?: QuestionStatus;
+  ownerId?: string;
+  visibility?: QuestionVisibility;
 }): Promise<Question> {
-  const prompt = buildQuestionPrompt(
-    params.type,
-    params.difficulty,
-    params.knowledgePoint
-  );
+  const kps =
+    params.knowledgePoints && params.knowledgePoints.length > 0
+      ? params.knowledgePoints
+      : params.knowledgePoint
+        ? [params.knowledgePoint]
+        : undefined;
+
+  const prompt = buildQuestionPrompt({
+    type: params.type,
+    difficulty: params.difficulty,
+    knowledgePoints: kps,
+    customPrompt: params.customPrompt,
+    stepCount: params.stepCount,
+    totalScore: params.totalScore || 100,
+    needsImage: params.needsImage,
+  });
 
   let lastError = '生成失败';
   for (let attempt = 1; attempt <= 3; attempt++) {
@@ -336,31 +423,34 @@ export async function generateQuestionWithAi(params: {
       const rawJson = JSON.parse(extractJsonBlock(text));
       const parsed = GeneratedQuestionSchema.parse(rawJson);
 
-      // Normalize total score
       const sumScore = parsed.checkpoints.reduce((s, c) => s + c.score, 0);
       if (Math.abs(sumScore - parsed.totalScore) > 0.01) {
         parsed.totalScore = sumScore;
       }
 
-      // Optional image generation if requested for word or web
       let generatedImageUrl: string | null = null;
       if (
-        parsed.needsImagePrompt &&
+        (params.needsImage || parsed.needsImagePrompt) &&
+        params.needsImage !== false &&
         (params.type === 'word' || params.type === 'web')
       ) {
         try {
-          const imgRes = await callImageGenerations(parsed.needsImagePrompt);
+          const imgRes = await callImageGenerations(
+            parsed.needsImagePrompt ||
+              `Clean educational illustration for ${parsed.title}`
+          );
           generatedImageUrl = imgRes.localUrl;
         } catch {
-          // Graceful fallback if image API unavailable
           generatedImageUrl = '/api/seed-assets/heritage.svg';
         }
       }
 
-      // Replace placeholder image path if an image was generated
       let materialsJsonStr = JSON.stringify(parsed.materials);
       let refAnswerJsonStr = JSON.stringify(parsed.referenceAnswer);
-      if (generatedImageUrl && generatedImageUrl !== '/api/seed-assets/heritage.svg') {
+      if (
+        generatedImageUrl &&
+        generatedImageUrl !== '/api/seed-assets/heritage.svg'
+      ) {
         materialsJsonStr = materialsJsonStr.replaceAll(
           '/api/seed-assets/heritage.svg',
           generatedImageUrl
@@ -382,7 +472,6 @@ export async function generateQuestionWithAi(params: {
       }
       const finalRefAnswer = JSON.parse(refAnswerJsonStr);
 
-      // Self-check: Reference Answer MUST score full marks!
       const selfCheck = gradeAnswerDeterministic(
         params.type,
         parsed.checkpoints,
@@ -404,7 +493,8 @@ export async function generateQuestionWithAi(params: {
         title: parsed.title,
         type: params.type,
         difficulty: params.difficulty,
-        knowledgePoints: parsed.knowledgePoints,
+        knowledgePoints: kps && kps.length > 0 ? kps : parsed.knowledgePoints,
+        knowledgePointIds: params.knowledgePointIds || [],
         scenario: parsed.scenario,
         totalScore: parsed.totalScore,
         materials: finalMaterials,
@@ -415,6 +505,8 @@ export async function generateQuestionWithAi(params: {
         commonMistakes: parsed.commonMistakes,
         status: params.status || 'published',
         source: 'ai',
+        ownerId: params.ownerId || 'system',
+        visibility: params.visibility || 'public',
         createdAt: now,
         updatedAt: now,
       };

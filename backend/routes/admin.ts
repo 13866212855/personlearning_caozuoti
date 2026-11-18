@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
-import { getDb, logAdminAction, rowToQuestion } from '../db';
+import { generateInviteCode, getDb, logAdminAction, rowToQuestion } from '../db';
 import { gradeAnswerDeterministic } from '../grader';
 import {
   type AuthedRequest,
@@ -17,11 +17,17 @@ import {
   regenerateQuestionAnswer,
 } from '../services/llm';
 import { maskApiKey } from '../utils/mask';
-import type { DifficultyLevel, QuestionType, SimulatorState } from '../types';
+import type {
+  DifficultyLevel,
+  ExamQuestionResult,
+  QuestionType,
+  SimulatorState,
+  UserRole,
+} from '../types';
 
 const router = Router();
 
-// Admin Login (isolated from student login)
+// Super Admin Login ONLY (isolated from /login)
 router.post('/auth/login', loginRateLimiter, (req, res) => {
   const schema = z.object({
     username: z.string().trim().min(1),
@@ -36,13 +42,16 @@ router.post('/auth/login', loginRateLimiter, (req, res) => {
   const { username, password } = parsed.data;
   const db = getDb();
   const admin = db
-    .prepare('SELECT * FROM admins WHERE username = ?')
+    .prepare(
+      "SELECT * FROM users WHERE username = ? AND role = 'super_admin'"
+    )
     .get(username) as
     | {
         id: string;
         username: string;
         password_hash: string;
-        is_default_password: number;
+        is_disabled: number;
+        must_change_password: number;
       }
     | undefined;
 
@@ -51,10 +60,15 @@ router.post('/auth/login', loginRateLimiter, (req, res) => {
     return;
   }
 
+  if (admin.is_disabled) {
+    res.status(403).json({ error: '该管理员账号已被禁用' });
+    return;
+  }
+
   const token = signAdminToken({
     sub: admin.id,
     username: admin.username,
-    role: 'admin',
+    role: 'super_admin',
   });
 
   res.json({
@@ -62,30 +76,34 @@ router.post('/auth/login', loginRateLimiter, (req, res) => {
     admin: {
       id: admin.id,
       username: admin.username,
-      mustChangePassword: Boolean(admin.is_default_password),
+      role: 'super_admin',
+      mustChangePassword: Boolean(admin.must_change_password),
     },
   });
 });
 
-// Protect all subsequent admin routes
+// Protect all subsequent super_admin routes
 router.use(requireAdminAuth);
 
 router.get('/auth/me', (req: AuthedRequest, res) => {
   const db = getDb();
   const row = db
-    .prepare('SELECT id, username, is_default_password FROM admins WHERE id = ?')
+    .prepare(
+      "SELECT id, username, must_change_password FROM users WHERE id = ? AND role = 'super_admin' AND is_disabled = 0"
+    )
     .get(req.admin!.id) as
-    | { id: string; username: string; is_default_password: number }
+    | { id: string; username: string; must_change_password: number }
     | undefined;
   if (!row) {
-    res.status(401).json({ error: '管理员不存在' });
+    res.status(401).json({ error: '管理员不存在或已禁用' });
     return;
   }
   res.json({
     admin: {
       id: row.id,
       username: row.username,
-      mustChangePassword: Boolean(row.is_default_password),
+      role: 'super_admin',
+      mustChangePassword: Boolean(row.must_change_password),
     },
   });
 });
@@ -105,7 +123,7 @@ router.post('/auth/change-password', (req: AuthedRequest, res) => {
 
   const db = getDb();
   const admin = db
-    .prepare('SELECT * FROM admins WHERE id = ?')
+    .prepare("SELECT id, password_hash FROM users WHERE id = ? AND role = 'super_admin'")
     .get(req.admin!.id) as { id: string; password_hash: string } | undefined;
 
   if (!admin || !bcrypt.compareSync(parsed.data.oldPassword, admin.password_hash)) {
@@ -115,26 +133,39 @@ router.post('/auth/change-password', (req: AuthedRequest, res) => {
 
   const newHash = bcrypt.hashSync(parsed.data.newPassword, 10);
   db.prepare(
-    'UPDATE admins SET password_hash = ?, is_default_password = 0, updated_at = ? WHERE id = ?'
+    'UPDATE users SET password_hash = ?, must_change_password = 0, updated_at = ? WHERE id = ?'
   ).run(newHash, new Date().toISOString(), admin.id);
 
   logAdminAction(
     req.admin!.id,
     req.admin!.username,
-    '修改管理员密码',
-    'admin',
+    '修改超级管理员密码',
+    'user',
     admin.id,
-    '管理员密码已更新'
+    '超级管理员密码已更新'
   );
 
   res.json({ ok: true });
 });
 
-// Overview Dashboard
+// ==================== Overview Dashboard ====================
 router.get('/overview', (_req, res) => {
   const db = getDb();
   const studentCount = (
-    db.prepare('SELECT COUNT(*) as cnt FROM students').get() as { cnt: number }
+    db.prepare("SELECT COUNT(*) as cnt FROM users WHERE role = 'student'").get() as {
+      cnt: number;
+    }
+  ).cnt;
+  const teacherCount = (
+    db.prepare("SELECT COUNT(*) as cnt FROM users WHERE role = 'teacher'").get() as {
+      cnt: number;
+    }
+  ).cnt;
+  const classCount = (
+    db.prepare('SELECT COUNT(*) as cnt FROM classes').get() as { cnt: number }
+  ).cnt;
+  const examTotal = (
+    db.prepare('SELECT COUNT(*) as cnt FROM exams').get() as { cnt: number }
   ).cnt;
   const questionTotal = (
     db.prepare('SELECT COUNT(*) as cnt FROM questions').get() as { cnt: number }
@@ -144,57 +175,91 @@ router.get('/overview', (_req, res) => {
       .prepare("SELECT COUNT(*) as cnt FROM questions WHERE status = 'published'")
       .get() as { cnt: number }
   ).cnt;
-  const submissionTotal = (
-    db.prepare('SELECT COUNT(*) as cnt FROM submissions').get() as {
-      cnt: number;
-    }
+  const legacySubTotal = (
+    db.prepare('SELECT COUNT(*) as cnt FROM submissions').get() as { cnt: number }
   ).cnt;
-  const avgRow = db
+  const examSubTotal = (
+    db
+      .prepare("SELECT COUNT(*) as cnt FROM exam_submissions WHERE status = 'submitted'")
+      .get() as { cnt: number }
+  ).cnt;
+
+  const avgExamRow = db
     .prepare(
-      'SELECT AVG(CASE WHEN max_score > 0 THEN final_score * 100.0 / max_score ELSE 0 END) as avg_pct FROM submissions'
+      "SELECT AVG(CASE WHEN max_score > 0 THEN final_score * 100.0 / max_score ELSE NULL END) as avg_pct FROM exam_submissions WHERE status = 'submitted'"
+    )
+    .get() as { avg_pct: number | null };
+  const avgLegacyRow = db
+    .prepare(
+      'SELECT AVG(CASE WHEN max_score > 0 THEN final_score * 100.0 / max_score ELSE NULL END) as avg_pct FROM submissions'
     )
     .get() as { avg_pct: number | null };
 
-  const typeRows = db
+  const avgPct =
+    avgExamRow.avg_pct !== null
+      ? avgExamRow.avg_pct
+      : avgLegacyRow.avg_pct !== null
+        ? avgLegacyRow.avg_pct
+        : 0;
+
+  const typeMap: Record<QuestionType, { sum: number; count: number }> = {
+    word: { sum: 0, count: 0 },
+    excel: { sum: 0, count: 0 },
+    web: { sum: 0, count: 0 },
+    file: { sum: 0, count: 0 },
+  };
+
+  const legacyByType = db
     .prepare(
       `SELECT q.type as type, COUNT(s.id) as count,
-              AVG(CASE WHEN s.max_score > 0 THEN s.final_score * 100.0 / s.max_score ELSE 0 END) as avg_score
+              SUM(CASE WHEN s.max_score > 0 THEN s.final_score * 100.0 / s.max_score ELSE 0 END) as sum_pct
        FROM submissions s
        LEFT JOIN questions q ON s.question_id = q.id
        GROUP BY q.type`
     )
-    .all() as Array<{ type: string; count: number; avg_score: number | null }>;
+    .all() as Array<{ type: QuestionType; count: number; sum_pct: number }>;
 
-  const typeMap: Record<string, { count: number; avgScore: number }> = {
-    word: { count: 0, avgScore: 0 },
-    excel: { count: 0, avgScore: 0 },
-    web: { count: 0, avgScore: 0 },
-    file: { count: 0, avgScore: 0 },
-  };
-  for (const r of typeRows) {
+  for (const r of legacyByType) {
     if (r.type && typeMap[r.type]) {
-      typeMap[r.type] = {
-        count: r.count,
-        avgScore: Math.round((r.avg_score || 0) * 10) / 10,
-      };
+      typeMap[r.type].count += r.count;
+      typeMap[r.type].sum += r.sum_pct || 0;
+    }
+  }
+
+  const examSubs = db
+    .prepare(
+      "SELECT question_results_json FROM exam_submissions WHERE status = 'submitted'"
+    )
+    .all() as Array<{ question_results_json: string }>;
+  for (const es of examSubs) {
+    const qrs = JSON.parse(es.question_results_json || '[]') as ExamQuestionResult[];
+    for (const qr of qrs) {
+      if (qr.type && typeMap[qr.type]) {
+        typeMap[qr.type].count += 1;
+        typeMap[qr.type].sum +=
+          qr.maxScore > 0 ? (qr.finalScore / qr.maxScore) * 100 : 0;
+      }
     }
   }
 
   res.json({
     studentCount,
+    teacherCount,
+    classCount,
+    examTotal,
     questionTotal,
     publishedCount,
-    submissionTotal,
-    avgScore: Math.round((avgRow.avg_pct || 0) * 10) / 10,
+    submissionTotal: legacySubTotal + examSubTotal,
+    avgScore: Math.round((avgPct || 0) * 10) / 10,
     submissionsByType: Object.entries(typeMap).map(([type, v]) => ({
       type,
       count: v.count,
-      avgScore: v.avgScore,
+      avgScore: v.count > 0 ? Math.round((v.sum / v.count) * 10) / 10 : 0,
     })),
   });
 });
 
-// LLM Configuration (strictly masks apiKey!)
+// ==================== LLM Configuration (strictly masks apiKey!) ====================
 router.get('/llm-config', (_req, res) => {
   const cfg = getLlmConfig();
   res.json({
@@ -205,6 +270,7 @@ router.get('/llm-config', (_req, res) => {
     temperature: cfg.temperature,
     maxTokens: cfg.max_tokens,
     timeoutMs: cfg.timeout_ms,
+    teacherDailyAiLimit: cfg.teacher_daily_ai_limit ?? 30,
     updatedAt: cfg.updated_at,
   });
 });
@@ -218,6 +284,7 @@ router.put('/llm-config', (req: AuthedRequest, res) => {
     temperature: z.number().min(0).max(2),
     maxTokens: z.number().int().min(256).max(32768),
     timeoutMs: z.number().int().min(5000).max(180000),
+    teacherDailyAiLimit: z.number().int().min(0).max(500).default(30),
   });
 
   const parsed = schema.safeParse(req.body);
@@ -238,7 +305,7 @@ router.put('/llm-config', (req: AuthedRequest, res) => {
   db.prepare(
     `UPDATE llm_configs
      SET base_url = ?, api_key = ?, text_model = ?, image_model = ?,
-         temperature = ?, max_tokens = ?, timeout_ms = ?, updated_at = ?
+         temperature = ?, max_tokens = ?, timeout_ms = ?, teacher_daily_ai_limit = ?, updated_at = ?
      WHERE id = 1`
   ).run(
     parsed.data.baseUrl.replace(/\/+$/, ''),
@@ -248,6 +315,7 @@ router.put('/llm-config', (req: AuthedRequest, res) => {
     parsed.data.temperature,
     parsed.data.maxTokens,
     parsed.data.timeoutMs,
+    parsed.data.teacherDailyAiLimit,
     now
   );
 
@@ -257,7 +325,7 @@ router.put('/llm-config', (req: AuthedRequest, res) => {
     '更新大模型配置',
     'llm_config',
     '1',
-    `BaseURL=${parsed.data.baseUrl}, TextModel=${parsed.data.textModel}, ImageModel=${parsed.data.imageModel}, KeyUpdated=${Boolean(inputKey && !inputKey.includes('****'))}`
+    `BaseURL=${parsed.data.baseUrl}, TextModel=${parsed.data.textModel}, TeacherLimit=${parsed.data.teacherDailyAiLimit}, KeyUpdated=${Boolean(inputKey && !inputKey.includes('****'))}`
   );
 
   res.json({
@@ -350,7 +418,7 @@ router.post('/llm-config/test-image', async (req, res) => {
   }
 });
 
-// Question Bank Management
+// ==================== Global Question Bank Management ====================
 router.get('/questions', (req, res) => {
   const db = getDb();
   const keyword = String(req.query.keyword || '').trim();
@@ -364,39 +432,49 @@ router.get('/questions', (req, res) => {
   const args: unknown[] = [];
 
   if (keyword) {
-    where.push('(title LIKE ? OR scenario LIKE ? OR knowledge_points_json LIKE ?)');
+    where.push('(q.title LIKE ? OR q.scenario LIKE ? OR q.knowledge_points_json LIKE ?)');
     args.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
   }
   if (type && ['word', 'excel', 'web', 'file'].includes(type)) {
-    where.push('type = ?');
+    where.push('q.type = ?');
     args.push(type);
   }
   if (difficulty && ['基础', '中等', '提高'].includes(difficulty)) {
-    where.push('difficulty = ?');
+    where.push('q.difficulty = ?');
     args.push(difficulty);
   }
   if (status && ['draft', 'published'].includes(status)) {
-    where.push('status = ?');
+    where.push('q.status = ?');
     args.push(status);
   }
 
   const whereSql = where.join(' AND ');
   const total = (
     db
-      .prepare(`SELECT COUNT(*) as cnt FROM questions WHERE ${whereSql}`)
+      .prepare(`SELECT COUNT(*) as cnt FROM questions q WHERE ${whereSql}`)
       .get(...args) as { cnt: number }
   ).cnt;
 
   const rows = db
     .prepare(
-      `SELECT * FROM questions WHERE ${whereSql} ORDER BY updated_at DESC LIMIT ? OFFSET ?`
+      `SELECT q.*, u.real_name as owner_name
+       FROM questions q
+       LEFT JOIN users u ON q.owner_id = u.id
+       WHERE ${whereSql}
+       ORDER BY q.updated_at DESC LIMIT ? OFFSET ?`
     )
     .all(...args, pageSize, (page - 1) * pageSize) as Array<
     Record<string, unknown>
   >;
 
   res.json({
-    items: rows.map(rowToQuestion),
+    items: rows.map((r) => ({
+      ...rowToQuestion(r),
+      ownerName:
+        String(r.owner_id) === 'system'
+          ? '系统题库'
+          : String(r.owner_name || '教师'),
+    })),
     total,
     page,
     pageSize,
@@ -407,7 +485,7 @@ router.get('/questions/:id', (req, res) => {
   const db = getDb();
   const row = db
     .prepare('SELECT * FROM questions WHERE id = ?')
-    .get(req.params.id) as Record<string, unknown> | undefined;
+    .get(String(req.params.id)) as Record<string, unknown> | undefined;
   if (!row) {
     res.status(404).json({ error: '题目不存在' });
     return;
@@ -430,6 +508,7 @@ router.post('/questions', (req: AuthedRequest, res) => {
     analysis: z.array(z.string()).default([]),
     commonMistakes: z.array(z.string()).default([]),
     status: z.enum(['draft', 'published']).default('draft'),
+    visibility: z.enum(['private', 'shared', 'public']).default('public'),
   });
 
   const parsed = schema.safeParse(req.body);
@@ -444,11 +523,11 @@ router.post('/questions', (req: AuthedRequest, res) => {
 
   db.prepare(
     `INSERT INTO questions (
-      id, title, type, difficulty, knowledge_points_json, scenario,
+      id, title, type, difficulty, knowledge_points_json, knowledge_point_ids_json, scenario,
       total_score, materials_json, steps_json, checkpoints_json,
       reference_answer_json, analysis_json, common_mistakes_json,
-      status, source, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'seed', ?, ?)`
+      status, source, owner_id, visibility, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'seed', 'system', ?, ?, ?)`
   ).run(
     id,
     parsed.data.title,
@@ -464,6 +543,7 @@ router.post('/questions', (req: AuthedRequest, res) => {
     JSON.stringify(parsed.data.analysis),
     JSON.stringify(parsed.data.commonMistakes),
     parsed.data.status,
+    parsed.data.visibility,
     now,
     now
   );
@@ -471,7 +551,7 @@ router.post('/questions', (req: AuthedRequest, res) => {
   logAdminAction(
     req.admin!.id,
     req.admin!.username,
-    '新建题目',
+    '新建系统题目',
     'question',
     id,
     parsed.data.title
@@ -497,7 +577,7 @@ router.put('/questions/:id', (req: AuthedRequest, res) => {
       title = ?, type = ?, difficulty = ?, knowledge_points_json = ?,
       scenario = ?, total_score = ?, materials_json = ?, steps_json = ?,
       checkpoints_json = ?, reference_answer_json = ?, analysis_json = ?,
-      common_mistakes_json = ?, status = ?, updated_at = ?
+      common_mistakes_json = ?, status = ?, visibility = ?, updated_at = ?
      WHERE id = ?`
   ).run(
     body.title ?? existing.title,
@@ -521,6 +601,7 @@ router.put('/questions/:id', (req: AuthedRequest, res) => {
       ? JSON.stringify(body.commonMistakes)
       : existing.common_mistakes_json,
     body.status ?? existing.status,
+    body.visibility ?? existing.visibility ?? 'public',
     now,
     String(req.params.id)
   );
@@ -590,7 +671,6 @@ router.delete('/questions/:id', (req: AuthedRequest, res) => {
   res.json({ ok: true });
 });
 
-// Batch AI Question Generation
 router.post('/questions/batch-generate', (req: AuthedRequest, res) => {
   const schema = z.object({
     type: z.enum(['word', 'excel', 'web', 'file']),
@@ -632,7 +712,6 @@ router.post('/questions/batch-generate', (req: AuthedRequest, res) => {
     `${parsed.data.type} / ${parsed.data.difficulty} / ${parsed.data.count} 题`
   );
 
-  // Run generation asynchronously
   void runBatchGenerationJob(
     jobId,
     parsed.data.type,
@@ -664,17 +743,19 @@ async function runBatchGenerationJob(
       const q = await generateQuestionWithAi({
         type,
         difficulty,
-        knowledgePoint,
+        knowledgePoints: knowledgePoint ? [knowledgePoint] : undefined,
         status: autoPublish ? 'published' : 'draft',
+        ownerId: 'system',
+        visibility: 'public',
       });
 
       db.prepare(
         `INSERT INTO questions (
-          id, title, type, difficulty, knowledge_points_json, scenario,
+          id, title, type, difficulty, knowledge_points_json, knowledge_point_ids_json, scenario,
           total_score, materials_json, steps_json, checkpoints_json,
           reference_answer_json, analysis_json, common_mistakes_json,
-          status, source, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          status, source, owner_id, visibility, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'system', 'public', ?, ?)`
       ).run(
         q.id,
         q.title,
@@ -786,7 +867,7 @@ router.post('/questions/:id/regenerate-answer', async (req: AuthedRequest, res) 
   }
 });
 
-// Submissions Management
+// ==================== Submissions Management (Unified users table) ====================
 router.get('/submissions', (req, res) => {
   const db = getDb();
   const studentKeyword = String(req.query.studentKeyword || '').trim();
@@ -832,7 +913,7 @@ router.get('/submissions', (req, res) => {
     db
       .prepare(
         `SELECT COUNT(*) as cnt FROM submissions s
-         LEFT JOIN students st ON s.student_id = st.id
+         LEFT JOIN users st ON s.student_id = st.id
          LEFT JOIN questions q ON s.question_id = q.id
          WHERE ${whereSql}`
       )
@@ -844,7 +925,7 @@ router.get('/submissions', (req, res) => {
       `SELECT s.*, st.real_name, st.username, st.grade, st.class_name, st.student_no,
               q.title as question_title, q.type as question_type
        FROM submissions s
-       LEFT JOIN students st ON s.student_id = st.id
+       LEFT JOIN users st ON s.student_id = st.id
        LEFT JOIN questions q ON s.question_id = q.id
        WHERE ${whereSql}
        ORDER BY s.created_at DESC
@@ -879,7 +960,7 @@ router.get('/submissions', (req, res) => {
   });
 });
 
-router.get('/submissions/export', (req, res) => {
+router.get('/submissions/export', (_req, res) => {
   const db = getDb();
   const rows = db
     .prepare(
@@ -888,7 +969,7 @@ router.get('/submissions/export', (req, res) => {
               s.auto_score, s.final_score, s.max_score, s.duration_seconds,
               s.teacher_comment, s.created_at
        FROM submissions s
-       LEFT JOIN students st ON s.student_id = st.id
+       LEFT JOIN users st ON s.student_id = st.id
        LEFT JOIN questions q ON s.question_id = q.id
        ORDER BY s.created_at DESC`
     )
@@ -957,7 +1038,7 @@ router.get('/submissions/:id', (req, res) => {
       `SELECT s.*, st.real_name, st.grade, st.class_name, st.username,
               q.title as question_title, q.type as question_type
        FROM submissions s
-       LEFT JOIN students st ON s.student_id = st.id
+       LEFT JOIN users st ON s.student_id = st.id
        LEFT JOIN questions q ON s.question_id = q.id
        WHERE s.id = ?`
     )
@@ -1102,14 +1183,479 @@ router.delete('/submissions/:id', (req: AuthedRequest, res) => {
   res.json({ ok: true });
 });
 
-// Student Management
+// ==================== Global Exam Monitor ====================
+router.get('/exams', (req, res) => {
+  const db = getDb();
+  const keyword = String(req.query.keyword || '').trim();
+  const page = Math.max(1, Number(req.query.page || 1));
+  const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize || 12)));
+
+  const where = ['1=1'];
+  const args: unknown[] = [];
+  if (keyword) {
+    where.push('(e.title LIKE ? OR u.real_name LIKE ? OR u.username LIKE ?)');
+    args.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
+  }
+
+  const total = (
+    db
+      .prepare(
+        `SELECT COUNT(*) as cnt FROM exams e LEFT JOIN users u ON e.teacher_id = u.id WHERE ${where.join(' AND ')}`
+      )
+      .get(...args) as { cnt: number }
+  ).cnt;
+
+  const rows = db
+    .prepare(
+      `SELECT e.*, u.real_name as teacher_name, u.username as teacher_username
+       FROM exams e
+       LEFT JOIN users u ON e.teacher_id = u.id
+       WHERE ${where.join(' AND ')}
+       ORDER BY e.created_at DESC
+       LIMIT ? OFFSET ?`
+    )
+    .all(...args, pageSize, (page - 1) * pageSize) as Array<
+    Record<string, unknown>
+  >;
+
+  const items = rows.map((e) => {
+    const qInfo = db
+      .prepare(
+        'SELECT COUNT(*) as cnt, COALESCE(SUM(score), 0) as total_score FROM exam_questions WHERE exam_id = ?'
+      )
+      .get(e.id) as { cnt: number; total_score: number };
+    const subInfo = db
+      .prepare(
+        "SELECT COUNT(*) as cnt, AVG(final_score) as avg_score FROM exam_submissions WHERE exam_id = ? AND status = 'submitted'"
+      )
+      .get(e.id) as { cnt: number; avg_score: number | null };
+
+    return {
+      id: e.id,
+      title: e.title,
+      teacherName: e.teacher_name || e.teacher_username || '未知教师',
+      status: e.status,
+      duration: e.duration,
+      startTime: e.start_time,
+      endTime: e.end_time,
+      questionCount: qInfo.cnt,
+      totalScore: qInfo.total_score,
+      submissionCount: subInfo.cnt,
+      avgScore:
+        subInfo.avg_score !== null && subInfo.avg_score !== undefined
+          ? Math.round(Number(subInfo.avg_score) * 10) / 10
+          : null,
+      createdAt: e.created_at,
+    };
+  });
+
+  res.json({ items, total, page, pageSize });
+});
+
+router.get('/exams/:id/results', (req, res) => {
+  const db = getDb();
+  const exam = db
+    .prepare(
+      `SELECT e.*, u.real_name as teacher_name
+       FROM exams e LEFT JOIN users u ON e.teacher_id = u.id
+       WHERE e.id = ?`
+    )
+    .get(String(req.params.id)) as Record<string, unknown> | undefined;
+  if (!exam) {
+    res.status(404).json({ error: '考试不存在' });
+    return;
+  }
+
+  const rows = db
+    .prepare(
+      `SELECT es.*, u.real_name, u.username, u.class_name, u.student_no
+       FROM exam_submissions es
+       INNER JOIN users u ON es.student_id = u.id
+       WHERE es.exam_id = ? AND es.status = 'submitted'
+       ORDER BY es.submitted_at DESC`
+    )
+    .all(String(req.params.id)) as Array<Record<string, unknown>>;
+
+  res.json({
+    exam: {
+      id: exam.id,
+      title: exam.title,
+      teacherName: exam.teacher_name || '未知教师',
+    },
+    items: rows.map((r) => ({
+      id: r.id,
+      studentName: r.real_name,
+      username: r.username,
+      className: r.class_name,
+      studentNo: r.student_no,
+      attemptNo: r.attempt_no,
+      finalScore: r.final_score,
+      maxScore: r.max_score,
+      switchCount: r.switch_count,
+      isLate: Boolean(r.is_late),
+      submittedAt: r.submitted_at,
+    })),
+  });
+});
+
+// ==================== Unified User & Role Management ====================
+router.get('/classes', (_req, res) => {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT c.id, c.name, c.grade, c.teacher_id, c.invite_code, u.real_name as teacher_name, u.username as teacher_username
+       FROM classes c
+       LEFT JOIN users u ON c.teacher_id = u.id
+       ORDER BY c.created_at DESC`
+    )
+    .all() as Array<Record<string, unknown>>;
+  res.json({
+    items: rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      grade: r.grade,
+      teacherId: r.teacher_id,
+      teacherName: r.teacher_name || r.teacher_username || '',
+      inviteCode: r.invite_code,
+    })),
+  });
+});
+
+router.get('/users', (req, res) => {
+  const db = getDb();
+  const role = String(req.query.role || '');
+  const keyword = String(req.query.keyword || '').trim();
+  const page = Math.max(1, Number(req.query.page || 1));
+  const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize || 15)));
+
+  const where = ['1=1'];
+  const args: unknown[] = [];
+  if (role && ['super_admin', 'teacher', 'student'].includes(role)) {
+    where.push('u.role = ?');
+    args.push(role);
+  }
+  if (keyword) {
+    where.push(
+      '(u.username LIKE ? OR u.real_name LIKE ? OR u.class_name LIKE ?)'
+    );
+    args.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
+  }
+
+  const whereSql = where.join(' AND ');
+  const total = (
+    db
+      .prepare(`SELECT COUNT(*) as cnt FROM users u WHERE ${whereSql}`)
+      .get(...args) as { cnt: number }
+  ).cnt;
+
+  const rows = db
+    .prepare(
+      `SELECT u.*, t.real_name as teacher_name, t.username as teacher_username
+       FROM users u
+       LEFT JOIN users t ON u.teacher_id = t.id
+       WHERE ${whereSql}
+       ORDER BY CASE u.role WHEN 'super_admin' THEN 0 WHEN 'teacher' THEN 1 ELSE 2 END, u.created_at DESC
+       LIMIT ? OFFSET ?`
+    )
+    .all(...args, pageSize, (page - 1) * pageSize) as Array<
+    Record<string, unknown>
+  >;
+
+  res.json({
+    items: rows.map((r) => ({
+      id: r.id,
+      username: r.username,
+      role: r.role as UserRole,
+      realName: r.real_name,
+      grade: r.grade,
+      className: r.class_name,
+      studentNo: r.student_no,
+      teacherId: r.teacher_id || '',
+      teacherName: r.teacher_name || r.teacher_username || '',
+      classId: r.class_id || '',
+      isDisabled: Boolean(r.is_disabled),
+      mustChangePassword: Boolean(r.must_change_password),
+      createdAt: r.created_at,
+    })),
+    total,
+    page,
+    pageSize,
+  });
+});
+
+router.post('/users/teacher', (req: AuthedRequest, res) => {
+  const schema = z.object({
+    username: z
+      .string()
+      .trim()
+      .min(3, '用户名至少 3 个字符')
+      .max(32)
+      .regex(/^[a-zA-Z0-9_]+$/, '用户名仅支持字母、数字和下划线'),
+    realName: z.string().trim().min(1, '教师姓名不能为空').max(32),
+    password: z.string().min(6, '初始密码至少 6 位').max(64),
+    defaultClassName: z.string().trim().max(40).default('高一(1)班'),
+    defaultGrade: z.string().trim().max(20).default('高一'),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message || '参数无效' });
+    return;
+  }
+
+  const db = getDb();
+  const exists = db
+    .prepare('SELECT id FROM users WHERE username = ?')
+    .get(parsed.data.username);
+  if (exists) {
+    res.status(409).json({ error: '该用户名已存在' });
+    return;
+  }
+
+  const teacherId = `tch-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const hash = bcrypt.hashSync(parsed.data.password, 10);
+  const now = new Date().toISOString();
+
+  let inviteCode = generateInviteCode();
+  while (
+    db.prepare('SELECT id FROM classes WHERE invite_code = ?').get(inviteCode)
+  ) {
+    inviteCode = generateInviteCode();
+  }
+
+  db.transaction(() => {
+    db.prepare(
+      `INSERT INTO users (
+        id, username, password_hash, role, real_name, grade, class_name,
+        student_no, teacher_id, class_id, is_disabled, must_change_password,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, 'teacher', ?, '', '', '', '', '', 0, 1, ?, ?)`
+    ).run(teacherId, parsed.data.username, hash, parsed.data.realName, now, now);
+
+    db.prepare(
+      `INSERT INTO classes (id, name, grade, teacher_id, invite_code, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      `cls-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      parsed.data.defaultClassName || '高一(1)班',
+      parsed.data.defaultGrade || '高一',
+      teacherId,
+      inviteCode,
+      now,
+      now
+    );
+  })();
+
+  logAdminAction(
+    req.admin!.id,
+    req.admin!.username,
+    '创建教师账号',
+    'user',
+    teacherId,
+    `${parsed.data.realName} (${parsed.data.username})`
+  );
+
+  res.status(201).json({ id: teacherId, inviteCode });
+});
+
+router.patch('/users/:id/role', (req: AuthedRequest, res) => {
+  const schema = z.object({
+    role: z.enum(['super_admin', 'teacher', 'student']),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: '角色无效' });
+    return;
+  }
+
+  const db = getDb();
+  const targetId = String(req.params.id);
+  const user = db
+    .prepare('SELECT id, username, role FROM users WHERE id = ?')
+    .get(targetId) as { id: string; username: string; role: UserRole } | undefined;
+  if (!user) {
+    res.status(404).json({ error: '用户不存在' });
+    return;
+  }
+
+  if (user.role === 'super_admin' && parsed.data.role !== 'super_admin') {
+    const cntRow = db
+      .prepare(
+        "SELECT COUNT(*) as cnt FROM users WHERE role = 'super_admin' AND is_disabled = 0"
+      )
+      .get() as { cnt: number };
+    if (cntRow.cnt <= 1) {
+      res.status(400).json({ error: '不能降级系统最后一个超级管理员' });
+      return;
+    }
+  }
+
+  db.prepare('UPDATE users SET role = ?, updated_at = ? WHERE id = ?').run(
+    parsed.data.role,
+    new Date().toISOString(),
+    targetId
+  );
+
+  logAdminAction(
+    req.admin!.id,
+    req.admin!.username,
+    '变更用户角色',
+    'user',
+    targetId,
+    `${user.username}: ${user.role} -> ${parsed.data.role}`
+  );
+
+  res.json({ ok: true });
+});
+
+router.patch('/users/:id/status', (req: AuthedRequest, res) => {
+  const schema = z.object({ isDisabled: z.boolean() });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: '参数无效' });
+    return;
+  }
+
+  const db = getDb();
+  const targetId = String(req.params.id);
+  const user = db
+    .prepare('SELECT id, username, role FROM users WHERE id = ?')
+    .get(targetId) as { id: string; username: string; role: UserRole } | undefined;
+  if (!user) {
+    res.status(404).json({ error: '用户不存在' });
+    return;
+  }
+
+  if (user.role === 'super_admin' && parsed.data.isDisabled) {
+    const cntRow = db
+      .prepare(
+        "SELECT COUNT(*) as cnt FROM users WHERE role = 'super_admin' AND is_disabled = 0"
+      )
+      .get() as { cnt: number };
+    if (cntRow.cnt <= 1) {
+      res.status(400).json({ error: '不能禁用系统最后一个超级管理员' });
+      return;
+    }
+  }
+
+  db.prepare('UPDATE users SET is_disabled = ?, updated_at = ? WHERE id = ?').run(
+    parsed.data.isDisabled ? 1 : 0,
+    new Date().toISOString(),
+    targetId
+  );
+
+  logAdminAction(
+    req.admin!.id,
+    req.admin!.username,
+    parsed.data.isDisabled ? '禁用用户账号' : '启用用户账号',
+    'user',
+    targetId,
+    user.username
+  );
+
+  res.json({ ok: true });
+});
+
+router.post('/users/:id/reset-password', (req: AuthedRequest, res) => {
+  const schema = z.object({
+    newPassword: z.string().min(6, '新密码至少 6 位').max(64),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message || '密码无效' });
+    return;
+  }
+
+  const db = getDb();
+  const targetId = String(req.params.id);
+  const user = db
+    .prepare('SELECT id, username FROM users WHERE id = ?')
+    .get(targetId) as { id: string; username: string } | undefined;
+  if (!user) {
+    res.status(404).json({ error: '用户不存在' });
+    return;
+  }
+
+  db.prepare(
+    'UPDATE users SET password_hash = ?, must_change_password = 1, updated_at = ? WHERE id = ?'
+  ).run(
+    bcrypt.hashSync(parsed.data.newPassword, 10),
+    new Date().toISOString(),
+    targetId
+  );
+
+  logAdminAction(
+    req.admin!.id,
+    req.admin!.username,
+    '重置用户密码',
+    'user',
+    targetId,
+    user.username
+  );
+
+  res.json({ ok: true });
+});
+
+router.patch('/users/:id/assign', (req: AuthedRequest, res) => {
+  const schema = z.object({
+    classId: z.string().min(1, '请选择目标班级'),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: '请选择班级' });
+    return;
+  }
+
+  const db = getDb();
+  const targetId = String(req.params.id);
+  const student = db
+    .prepare("SELECT id, username FROM users WHERE id = ? AND role = 'student'")
+    .get(targetId) as { id: string; username: string } | undefined;
+  if (!student) {
+    res.status(404).json({ error: '学生不存在' });
+    return;
+  }
+
+  const cls = db
+    .prepare('SELECT id, name, grade, teacher_id FROM classes WHERE id = ?')
+    .get(parsed.data.classId) as
+    | { id: string; name: string; grade: string; teacher_id: string }
+    | undefined;
+  if (!cls) {
+    res.status(404).json({ error: '目标班级不存在' });
+    return;
+  }
+
+  db.prepare(
+    'UPDATE users SET teacher_id = ?, class_id = ?, class_name = ?, grade = ?, updated_at = ? WHERE id = ?'
+  ).run(
+    cls.teacher_id,
+    cls.id,
+    cls.name,
+    cls.grade,
+    new Date().toISOString(),
+    targetId
+  );
+
+  logAdminAction(
+    req.admin!.id,
+    req.admin!.username,
+    '调整学生所属班级与教师',
+    'user',
+    targetId,
+    `${student.username} -> ${cls.name}`
+  );
+
+  res.json({ ok: true });
+});
+
+// Legacy /students endpoints kept compatible (now reading from users where role='student')
 router.get('/students', (req, res) => {
   const db = getDb();
   const keyword = String(req.query.keyword || '').trim();
   const page = Math.max(1, Number(req.query.page || 1));
   const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize || 12)));
 
-  const where: string[] = ['1=1'];
+  const where: string[] = ["st.role = 'student'"];
   const args: unknown[] = [];
   if (keyword) {
     where.push(
@@ -1121,7 +1667,7 @@ router.get('/students', (req, res) => {
 
   const total = (
     db
-      .prepare(`SELECT COUNT(*) as cnt FROM students st WHERE ${whereSql}`)
+      .prepare(`SELECT COUNT(*) as cnt FROM users st WHERE ${whereSql}`)
       .get(...args) as { cnt: number }
   ).cnt;
 
@@ -1129,12 +1675,10 @@ router.get('/students', (req, res) => {
     .prepare(
       `SELECT st.id, st.username, st.real_name, st.grade, st.class_name,
               st.is_disabled, st.created_at,
-              COUNT(s.id) as practice_count,
-              AVG(CASE WHEN s.max_score > 0 THEN s.final_score * 100.0 / s.max_score ELSE NULL END) as avg_score
-       FROM students st
-       LEFT JOIN submissions s ON st.id = s.student_id
+              (SELECT COUNT(*) FROM exam_submissions es WHERE es.student_id = st.id AND es.status = 'submitted') as exam_count,
+              (SELECT AVG(CASE WHEN es.max_score > 0 THEN es.final_score * 100.0 / es.max_score ELSE NULL END) FROM exam_submissions es WHERE es.student_id = st.id AND es.status = 'submitted') as avg_score
+       FROM users st
        WHERE ${whereSql}
-       GROUP BY st.id
        ORDER BY st.created_at DESC
        LIMIT ? OFFSET ?`
     )
@@ -1150,7 +1694,7 @@ router.get('/students', (req, res) => {
       grade: r.grade,
       className: r.class_name,
       isDisabled: Boolean(r.is_disabled),
-      practiceCount: Number(r.practice_count || 0),
+      practiceCount: Number(r.exam_count || 0),
       avgScore:
         r.avg_score !== null ? Math.round(Number(r.avg_score) * 10) / 10 : 0,
       createdAt: r.created_at,
@@ -1176,8 +1720,10 @@ router.post('/students/:id/reset-password', (req: AuthedRequest, res) => {
   const db = getDb();
   const hash = bcrypt.hashSync(parsed.data.newPassword, 10);
   const info = db
-    .prepare('UPDATE students SET password_hash = ? WHERE id = ?')
-    .run(hash, String(req.params.id));
+    .prepare(
+      "UPDATE users SET password_hash = ?, must_change_password = 1, updated_at = ? WHERE id = ? AND role = 'student'"
+    )
+    .run(hash, new Date().toISOString(), String(req.params.id));
   if (info.changes === 0) {
     res.status(404).json({ error: '学生不存在' });
     return;
@@ -1187,7 +1733,7 @@ router.post('/students/:id/reset-password', (req: AuthedRequest, res) => {
     req.admin!.id,
     req.admin!.username,
     '重置学生密码',
-    'student',
+    'user',
     String(req.params.id),
     ''
   );
@@ -1204,8 +1750,14 @@ router.patch('/students/:id/status', (req: AuthedRequest, res) => {
 
   const db = getDb();
   const info = db
-    .prepare('UPDATE students SET is_disabled = ? WHERE id = ?')
-    .run(parsed.data.isDisabled ? 1 : 0, String(req.params.id));
+    .prepare(
+      "UPDATE users SET is_disabled = ?, updated_at = ? WHERE id = ? AND role = 'student'"
+    )
+    .run(
+      parsed.data.isDisabled ? 1 : 0,
+      new Date().toISOString(),
+      String(req.params.id)
+    );
   if (info.changes === 0) {
     res.status(404).json({ error: '学生不存在' });
     return;
@@ -1215,7 +1767,7 @@ router.patch('/students/:id/status', (req: AuthedRequest, res) => {
     req.admin!.id,
     req.admin!.username,
     parsed.data.isDisabled ? '禁用学生账号' : '启用学生账号',
-    'student',
+    'user',
     String(req.params.id),
     ''
   );
@@ -1226,7 +1778,7 @@ router.get('/students/:id/stats', (req, res) => {
   const db = getDb();
   const student = db
     .prepare(
-      'SELECT id, username, real_name, grade, class_name FROM students WHERE id = ?'
+      "SELECT id, username, real_name, grade, class_name FROM users WHERE id = ? AND role = 'student'"
     )
     .get(String(req.params.id)) as Record<string, unknown> | undefined;
   if (!student) {
@@ -1234,14 +1786,13 @@ router.get('/students/:id/stats', (req, res) => {
     return;
   }
 
-  const subs = db
+  const examSubs = db
     .prepare(
-      `SELECT s.id, s.final_score, s.max_score, s.created_at, q.title, q.type
-       FROM submissions s
-       LEFT JOIN questions q ON s.question_id = q.id
-       WHERE s.student_id = ?
-       ORDER BY s.created_at DESC
-       LIMIT 20`
+      `SELECT es.id, es.final_score, es.max_score, es.submitted_at, e.title
+       FROM exam_submissions es
+       INNER JOIN exams e ON es.exam_id = e.id
+       WHERE es.student_id = ? AND es.status = 'submitted'
+       ORDER BY es.submitted_at DESC LIMIT 20`
     )
     .all(String(req.params.id)) as Array<Record<string, unknown>>;
 
@@ -1253,18 +1804,18 @@ router.get('/students/:id/stats', (req, res) => {
       grade: student.grade,
       className: student.class_name,
     },
-    recentSubmissions: subs.map((s) => ({
+    recentSubmissions: examSubs.map((s) => ({
       id: s.id,
       title: s.title,
-      type: s.type,
+      type: 'word',
       finalScore: s.final_score,
       maxScore: s.max_score,
-      createdAt: s.created_at,
+      createdAt: s.submitted_at,
     })),
   });
 });
 
-// Operation Logs
+// ==================== Operation Logs ====================
 router.get('/logs', (req, res) => {
   const db = getDb();
   const page = Math.max(1, Number(req.query.page || 1));

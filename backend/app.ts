@@ -7,6 +7,8 @@ import authRoutes from './routes/auth';
 import questionRoutes from './routes/questions';
 import examRoutes from './routes/exams';
 import profileRoutes from './routes/profile';
+import teacherRoutes from './routes/teacher';
+import notificationRoutes from './routes/notifications';
 import adminRoutes from './routes/admin';
 
 export function createExpressApiApp() {
@@ -62,6 +64,8 @@ export function createExpressApiApp() {
   app.use('/api/questions', questionRoutes);
   app.use('/api/exams', examRoutes);
   app.use('/api/profile', profileRoutes);
+  app.use('/api/teacher', teacherRoutes);
+  app.use('/api/notifications', notificationRoutes);
   app.use('/api/admin', adminRoutes);
 
   return app;

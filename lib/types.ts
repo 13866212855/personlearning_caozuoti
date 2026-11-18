@@ -1,5 +1,7 @@
+export type UserRole = 'super_admin' | 'teacher' | 'student';
 export type QuestionType = 'word' | 'excel' | 'web' | 'file';
 export type DifficultyLevel = '基础' | '中等' | '提高';
+export type QuestionVisibility = 'private' | 'shared' | 'public';
 
 export interface WordParagraph {
   id: string;
@@ -109,6 +111,7 @@ export interface QuestionStep {
   index: number;
   instruction: string;
   score: number;
+  hint?: string;
 }
 
 export interface QuestionAsset {
@@ -123,6 +126,7 @@ export interface ClientQuestion {
   type: QuestionType;
   difficulty: DifficultyLevel;
   knowledgePoints: string[];
+  knowledgePointIds?: string[];
   scenario: string;
   totalScore: number;
   materials: {
@@ -132,6 +136,28 @@ export interface ClientQuestion {
   };
   steps: QuestionStep[];
   source: 'seed' | 'ai';
+  visibility?: QuestionVisibility;
+}
+
+export interface FullQuestion extends ClientQuestion {
+  checkpoints: Array<{
+    id: string;
+    stepIndex: number;
+    description: string;
+    score: number;
+    ruleType: string;
+    params: Record<string, unknown>;
+  }>;
+  referenceAnswer: SimulatorState;
+  analysis: string[];
+  commonMistakes: string[];
+  status: 'draft' | 'published';
+  ownerId: string;
+  ownerName?: string;
+  isOwner?: boolean;
+  visibility: QuestionVisibility;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface CheckpointResult {
@@ -143,6 +169,17 @@ export interface CheckpointResult {
   passed: boolean;
   feedback: string;
   gradedByAi?: boolean;
+}
+
+export interface ExamQuestionResult {
+  questionId: string;
+  title: string;
+  type: QuestionType;
+  maxScore: number;
+  autoScore: number;
+  finalScore: number;
+  checkpointResults: CheckpointResult[];
+  gradedByAi: boolean;
 }
 
 export interface SubmitResponse {
@@ -159,12 +196,93 @@ export interface SubmitResponse {
   commonMistakes: string[];
 }
 
-export interface StudentProfile {
+export interface PortalUser {
   id: string;
   username: string;
+  role: UserRole;
   realName: string;
   grade: string;
   className: string;
+  studentNo?: string;
+  teacherId?: string;
+  teacherName?: string;
+  classId?: string;
+  mustChangePassword: boolean;
+  unreadNotifications?: number;
+}
+
+export interface StudentExamCard {
+  id: string;
+  title: string;
+  description: string;
+  teacherName: string;
+  questionCount: number;
+  totalScore: number;
+  duration: number;
+  startTime: string;
+  endTime: string;
+  maxAttempts: number;
+  attemptsUsed: number;
+  scorePolicy: 'highest' | 'latest';
+  showScoreImmediately: boolean;
+  showAnswerPolicy: 'immediate' | 'after_end' | 'never';
+  answerVisible: boolean;
+  antiCheatSwitch: boolean;
+  allowLate: boolean;
+  examStatus: string;
+  canEnter: boolean;
+  statusReason: string;
+  hasInProgress: boolean;
+  inProgressSubmissionId: string | null;
+  remainingSeconds: number | null;
+  displayScore: number | null;
+  lastSubmittedAt: string | null;
+  isPastDeadline: boolean;
+}
+
+export interface NotificationItem {
+  id: string;
+  type: string;
+  title: string;
+  content: string;
+  link: string;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface ClassItem {
+  id: string;
+  name: string;
+  grade: string;
+  inviteCode: string;
+  studentCount: number;
+  createdAt: string;
+}
+
+export interface KnowledgePointItem {
+  id: string;
+  type: QuestionType;
+  chapter: string;
+  name: string;
+  isSystem: boolean;
+}
+
+export interface TeacherExamSummary {
+  id: string;
+  title: string;
+  description: string;
+  duration: number;
+  startTime: string;
+  endTime: string;
+  status: 'draft' | 'published' | 'ended';
+  runtimeStatus: string;
+  questionCount: number;
+  totalScore: number;
+  targetSummary: string;
+  assignedCount: number;
+  submittedCount: number;
+  avgScore: number | null;
+  createdAt: string;
 }
 
 export const TYPE_LABELS: Record<QuestionType, string> = {

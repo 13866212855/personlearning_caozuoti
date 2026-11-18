@@ -7,6 +7,9 @@ import { TYPE_LABELS, type QuestionType } from '@/lib/types';
 
 interface OverviewData {
   studentCount: number;
+  teacherCount?: number;
+  classCount?: number;
+  examTotal?: number;
   questionTotal: number;
   publishedCount: number;
   submissionTotal: number;
@@ -59,22 +62,25 @@ export default function AdminOverviewTab() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white border border-slate-200 rounded-xl p-5">
-          <div className="text-xs text-slate-500">注册学生总数</div>
+          <div className="text-xs text-slate-500">教师 / 班级 / 学生规模</div>
           <div className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">
-            {data.studentCount}
-          </div>
-        </div>
-        <div className="bg-white border border-slate-200 rounded-xl p-5">
-          <div className="text-xs text-slate-500">题库总数（已发布）</div>
-          <div className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">
-            {data.questionTotal}{' '}
-            <span className="text-sm font-normal text-teal-700">
-              ({data.publishedCount})
+            {data.studentCount}{' '}
+            <span className="text-xs font-normal text-slate-500">
+              生 · {data.teacherCount ?? 0} 师 / {data.classCount ?? 0} 班
             </span>
           </div>
         </div>
         <div className="bg-white border border-slate-200 rounded-xl p-5">
-          <div className="text-xs text-slate-500">累计提交次数</div>
+          <div className="text-xs text-slate-500">题库总数（已发布）/ 考试场次</div>
+          <div className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">
+            {data.questionTotal}{' '}
+            <span className="text-xs font-normal text-teal-700">
+              ({data.publishedCount}) · {data.examTotal ?? 0} 场考
+            </span>
+          </div>
+        </div>
+        <div className="bg-white border border-slate-200 rounded-xl p-5">
+          <div className="text-xs text-slate-500">累计交卷与练习次数</div>
           <div className="text-2xl font-bold text-sky-700 mt-1 tabular-nums">
             {data.submissionTotal}
           </div>

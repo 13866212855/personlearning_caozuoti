@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { BookOpen, Loader2 } from 'lucide-react';
-import { setStudentToken, studentFetch } from '@/lib/api';
+import { portalFetch, setPortalToken } from '@/lib/api';
 
 export default function StudentRegisterPage() {
   const router = useRouter();
@@ -15,6 +15,7 @@ export default function StudentRegisterPage() {
     realName: '',
     grade: '高一',
     className: '',
+    inviteCode: '',
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -39,10 +40,14 @@ export default function StudentRegisterPage() {
       setError('请完整填写真实姓名和班级');
       return;
     }
+    if (!form.inviteCode.trim()) {
+      setError('请填写任课教师提供的班级邀请码');
+      return;
+    }
 
     setLoading(true);
     try {
-      const res = await studentFetch<{ token: string }>('/api/auth/register', {
+      const res = await portalFetch<{ token: string }>('/api/auth/register', {
         method: 'POST',
         body: JSON.stringify({
           username: form.username.trim(),
@@ -51,9 +56,10 @@ export default function StudentRegisterPage() {
           realName: form.realName.trim(),
           grade: form.grade,
           className: form.className.trim(),
+          inviteCode: form.inviteCode.trim(),
         }),
       });
-      setStudentToken(res.token);
+      setPortalToken(res.token);
       router.replace('/');
     } catch (err) {
       setError(err instanceof Error ? err.message : '注册失败');
@@ -71,7 +77,7 @@ export default function StudentRegisterPage() {
           </div>
           <h1 className="text-xl font-bold text-slate-900">学生账号注册</h1>
           <p className="text-sm text-slate-500">
-            创建个人学习档案，记录操作题练习与错题本
+            填写任课教师提供的班级邀请码加入班级参与模拟考试
           </p>
         </div>
 
@@ -82,6 +88,21 @@ export default function StudentRegisterPage() {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-3.5">
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-700">
+              班级邀请码（请向任课教师获取）
+            </label>
+            <input
+              type="text"
+              value={form.inviteCode}
+              onChange={(e) =>
+                setForm({ ...form, inviteCode: e.target.value.toUpperCase() })
+              }
+              placeholder="请输入教师提供的班级邀请码"
+              className="w-full h-9 px-3 rounded-lg border border-slate-300 text-sm font-mono uppercase focus:outline-none focus:border-sky-600"
+            />
+          </div>
+
           <div className="space-y-1">
             <label className="block text-xs font-medium text-slate-700">
               用户名（唯一标识，字母/数字/下划线）
@@ -104,7 +125,7 @@ export default function StudentRegisterPage() {
                 type="text"
                 value={form.realName}
                 onChange={(e) => setForm({ ...form, realName: e.target.value })}
-                placeholder="例如：李明"
+                placeholder="请输入真实姓名"
                 className="w-full h-9 px-3 rounded-lg border border-slate-300 text-sm focus:outline-none focus:border-sky-600"
               />
             </div>
@@ -126,13 +147,13 @@ export default function StudentRegisterPage() {
 
           <div className="space-y-1">
             <label className="block text-xs font-medium text-slate-700">
-              班级
+              班级名称
             </label>
             <input
               type="text"
               value={form.className}
               onChange={(e) => setForm({ ...form, className: e.target.value })}
-              placeholder="例如：1班 或 高一(3)班"
+              placeholder="例如：高一(1)班"
               className="w-full h-9 px-3 rounded-lg border border-slate-300 text-sm focus:outline-none focus:border-sky-600"
             />
           </div>
@@ -171,7 +192,7 @@ export default function StudentRegisterPage() {
             className="w-full h-10 mt-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white font-medium rounded-lg text-sm transition-colors flex items-center justify-center gap-2"
           >
             {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-            <span>{loading ? '正在注册...' : '注册并进入系统'}</span>
+            <span>{loading ? '正在注册...' : '验证邀请码并注册'}</span>
           </button>
         </form>
 

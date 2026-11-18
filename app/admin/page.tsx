@@ -5,6 +5,7 @@ import {
   Activity,
   AlertTriangle,
   Bot,
+  ClipboardList,
   Database,
   FileCheck2,
   KeyRound,
@@ -14,13 +15,14 @@ import {
   Shield,
   Users,
 } from 'lucide-react';
+import AdminExamsTab from '@/components/admin/AdminExamsTab';
 import AdminLlmConfigTab from '@/components/admin/AdminLlmConfigTab';
 import AdminLogsTab from '@/components/admin/AdminLogsTab';
 import AdminOverviewTab from '@/components/admin/AdminOverviewTab';
 import AdminPasswordTab from '@/components/admin/AdminPasswordTab';
 import AdminQuestionsTab from '@/components/admin/AdminQuestionsTab';
-import AdminStudentsTab from '@/components/admin/AdminStudentsTab';
 import AdminSubmissionsTab from '@/components/admin/AdminSubmissionsTab';
+import AdminUsersTab from '@/components/admin/AdminUsersTab';
 import {
   adminFetch,
   clearAdminToken,
@@ -30,10 +32,11 @@ import {
 
 type AdminTab =
   | 'overview'
+  | 'users'
+  | 'exams'
   | 'llm'
   | 'questions'
   | 'submissions'
-  | 'students'
   | 'logs'
   | 'password';
 
@@ -111,9 +114,9 @@ export default function AdminPortalPage() {
             <div className="w-11 h-11 rounded-xl bg-slate-900 text-white flex items-center justify-center mx-auto">
               <Shield className="w-5 h-5" />
             </div>
-            <h1 className="text-xl font-bold text-slate-900">管理后台登录</h1>
+            <h1 className="text-xl font-bold text-slate-900">超级管理后台登录</h1>
             <p className="text-xs text-slate-500">
-              仅限系统管理员与学科教师使用
+              仅限系统超级管理员登录使用
             </p>
           </div>
 
@@ -171,10 +174,11 @@ export default function AdminPortalPage() {
   const menuItems: Array<{ id: AdminTab; label: string; icon: typeof LayoutDashboard }> =
     [
       { id: 'overview', label: '数据概览', icon: LayoutDashboard },
+      { id: 'users', label: '用户与角色', icon: Users },
+      { id: 'exams', label: '全局考试监控', icon: ClipboardList },
       { id: 'llm', label: '大模型配置', icon: Bot },
-      { id: 'questions', label: '题库管理', icon: Database },
-      { id: 'submissions', label: '提交记录', icon: FileCheck2 },
-      { id: 'students', label: '学生管理', icon: Users },
+      { id: 'questions', label: '全局题库', icon: Database },
+      { id: 'submissions', label: '历史练习记录', icon: FileCheck2 },
       { id: 'logs', label: '操作日志', icon: Activity },
       { id: 'password', label: '修改密码', icon: KeyRound },
     ];
@@ -254,10 +258,11 @@ export default function AdminPortalPage() {
 
         <main className="flex-1 p-5 sm:p-7 min-w-0">
           {activeTab === 'overview' && <AdminOverviewTab />}
+          {activeTab === 'users' && <AdminUsersTab />}
+          {activeTab === 'exams' && <AdminExamsTab />}
           {activeTab === 'llm' && <AdminLlmConfigTab />}
           {activeTab === 'questions' && <AdminQuestionsTab />}
           {activeTab === 'submissions' && <AdminSubmissionsTab />}
-          {activeTab === 'students' && <AdminStudentsTab />}
           {activeTab === 'logs' && <AdminLogsTab />}
           {activeTab === 'password' && (
             <AdminPasswordTab

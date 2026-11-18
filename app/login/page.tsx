@@ -4,9 +4,15 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { BookOpen, Loader2 } from 'lucide-react';
-import { getStudentToken, setStudentToken, studentFetch } from '@/lib/api';
+import {
+  clearPortalToken,
+  getPortalToken,
+  portalFetch,
+  setPortalToken,
+} from '@/lib/api';
+import type { PortalUser } from '@/lib/types';
 
-export default function StudentLoginPage() {
+export default function PortalLoginPage() {
   const router = useRouter();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -14,9 +20,21 @@ export default function StudentLoginPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (getStudentToken()) {
-      router.replace('/');
-    }
+    const token = getPortalToken();
+    if (!token) return;
+    portalFetch<{ user: PortalUser }>('/api/auth/me')
+      .then((res) => {
+        if (res.user.role === 'teacher') {
+          router.replace('/teacher');
+        } else if (res.user.role === 'student') {
+          router.replace('/');
+        } else {
+          clearPortalToken();
+        }
+      })
+      .catch(() => {
+        clearPortalToken();
+      });
   }, [router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -28,14 +46,21 @@ export default function StudentLoginPage() {
     }
     setLoading(true);
     try {
-      const res = await studentFetch<{ token: string }>('/api/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ username: username.trim(), password }),
-      });
-      setStudentToken(res.token);
-      router.replace('/');
+      const res = await portalFetch<{ token: string; user: PortalUser }>(
+        '/api/auth/login',
+        {
+          method: 'POST',
+          body: JSON.stringify({ username: username.trim(), password }),
+        }
+      );
+      setPortalToken(res.token);
+      if (res.user.role === 'teacher') {
+        router.replace('/teacher');
+      } else {
+        router.replace('/');
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '登录失败，请检查账号密码');
+      setError(err instanceof Error ? err.message : '账号或密码错误');
     } finally {
       setLoading(false);
     }
@@ -49,9 +74,11 @@ export default function StudentLoginPage() {
             <BookOpen className="w-5 h-5" />
           </div>
           <h1 className="text-xl font-bold text-slate-900">
-            高中信息技术会考·操作题练习系统
+            高中信息技术会考·操作题系统
           </h1>
-          <p className="text-sm text-slate-500">请使用学生账号登录开始练习</p>
+          <p className="text-sm text-slate-500">
+            教师与学生统一登录入口，请使用个人账号登录
+          </p>
         </div>
 
         {error && (
@@ -74,7 +101,7 @@ export default function StudentLoginPage() {
               autoComplete="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="请输入注册用户名"
+              placeholder="请输入个人用户名"
               className="w-full h-10 px-3.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-600"
             />
           </div>
@@ -92,7 +119,7 @@ export default function StudentLoginPage() {
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="请输入密码"
+              placeholder="请输入登录密码"
               className="w-full h-10 px-3.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-600"
             />
           </div>
@@ -113,7 +140,7 @@ export default function StudentLoginPage() {
             href="/register"
             className="text-sky-700 font-medium hover:underline"
           >
-            立即注册
+            学生自助注册
           </Link>
         </div>
       </div>

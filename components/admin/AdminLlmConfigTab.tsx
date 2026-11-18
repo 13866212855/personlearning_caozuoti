@@ -12,6 +12,7 @@ interface LlmConfigView {
   temperature: number;
   maxTokens: number;
   timeoutMs: number;
+  teacherDailyAiLimit?: number;
   updatedAt: string;
 }
 
@@ -29,6 +30,7 @@ export default function AdminLlmConfigTab() {
   const [temperature, setTemperature] = useState(0.4);
   const [maxTokens, setMaxTokens] = useState(4096);
   const [timeoutMs, setTimeoutMs] = useState(45000);
+  const [teacherDailyAiLimit, setTeacherDailyAiLimit] = useState(30);
 
   const [testingText, setTestingText] = useState(false);
   const [textTestRes, setTextTestRes] = useState<{
@@ -56,6 +58,7 @@ export default function AdminLlmConfigTab() {
         setTemperature(cfg.temperature);
         setMaxTokens(cfg.maxTokens);
         setTimeoutMs(cfg.timeoutMs);
+        setTeacherDailyAiLimit(cfg.teacherDailyAiLimit ?? 30);
       })
       .catch((err) => setErrorMsg(err.message))
       .finally(() => setLoading(false));
@@ -79,6 +82,7 @@ export default function AdminLlmConfigTab() {
             temperature: Number(temperature),
             maxTokens: Number(maxTokens),
             timeoutMs: Number(timeoutMs),
+            teacherDailyAiLimit: Number(teacherDailyAiLimit),
           }),
         }
       );
@@ -241,7 +245,7 @@ export default function AdminLlmConfigTab() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="space-y-1.5">
             <label className="block text-xs font-medium text-slate-700">
               Temperature (0~2)
@@ -280,6 +284,19 @@ export default function AdminLlmConfigTab() {
               step="1000"
               value={timeoutMs}
               onChange={(e) => setTimeoutMs(Number(e.target.value))}
+              className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm tabular-nums"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="block text-xs font-medium text-slate-700">
+              教师每日 AI 出题上限
+            </label>
+            <input
+              type="number"
+              min="0"
+              max="500"
+              value={teacherDailyAiLimit}
+              onChange={(e) => setTeacherDailyAiLimit(Number(e.target.value))}
               className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm tabular-nums"
             />
           </div>

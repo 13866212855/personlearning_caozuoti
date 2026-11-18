@@ -1,6 +1,8 @@
+export type UserRole = 'super_admin' | 'teacher' | 'student';
 export type QuestionType = 'word' | 'excel' | 'web' | 'file';
 export type DifficultyLevel = '基础' | '中等' | '提高';
 export type QuestionStatus = 'draft' | 'published';
+export type QuestionVisibility = 'private' | 'shared' | 'public';
 
 export interface WordParagraph {
   id: string;
@@ -13,7 +15,7 @@ export interface WordParagraph {
   underline: boolean;
   align: 'left' | 'center' | 'right' | 'justify';
   lineHeight: number;
-  indent: number; // in characters (e.g. 0 or 2)
+  indent: number;
   listType: 'none' | 'bullet' | 'number';
 }
 
@@ -134,6 +136,7 @@ export interface Question {
   type: QuestionType;
   difficulty: DifficultyLevel;
   knowledgePoints: string[];
+  knowledgePointIds?: string[];
   scenario: string;
   totalScore: number;
   materials: QuestionMaterials;
@@ -144,6 +147,8 @@ export interface Question {
   commonMistakes: string[];
   status: QuestionStatus;
   source: 'seed' | 'ai';
+  ownerId?: string;
+  visibility?: QuestionVisibility;
   createdAt: string;
   updatedAt: string;
 }
@@ -162,6 +167,17 @@ export interface CheckpointResult {
 export interface GradeResult {
   autoScore: number;
   maxScore: number;
+  checkpointResults: CheckpointResult[];
+  gradedByAi: boolean;
+}
+
+export interface ExamQuestionResult {
+  questionId: string;
+  title: string;
+  type: QuestionType;
+  maxScore: number;
+  autoScore: number;
+  finalScore: number;
   checkpointResults: CheckpointResult[];
   gradedByAi: boolean;
 }
