@@ -1,0 +1,6 @@
+{
+  "name": "高中信息技术会考·操作题练习系统",
+  "description": "面向高中信息技术学业水平考试的操作题智能练习、模拟操作环境与自动评分平台。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
