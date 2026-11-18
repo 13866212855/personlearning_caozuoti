@@ -1,29 +1,78 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { BookOpen, Loader2 } from 'lucide-react';
+import {
+  BookOpen,
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  Loader2,
+  XCircle,
+} from 'lucide-react';
 import { portalFetch, setPortalToken } from '@/lib/api';
+
+type LookupState = 'idle' | 'checking' | 'found' | 'invalid';
+
+interface ClassInfo {
+  name: string;
+  grade: string;
+}
 
 export default function StudentRegisterPage() {
   const router = useRouter();
   const [form, setForm] = useState({
     username: '',
     password: '',
-    confirmPassword: '',
     realName: '',
-    grade: '高一',
-    className: '',
     inviteCode: '',
   });
+  const [classInfo, setClassInfo] = useState<ClassInfo | null>(null);
+  const [lookup, setLookup] = useState<LookupState>('idle');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const lookupEpoch = useRef(0);
+
+  // Invite-code live verification: debounced lookup as the student types.
+  // The class name/grade come back from the server and are displayed
+  // read-only, so students never hand-type them (and cannot mistype them).
+  useEffect(() => {
+    const code = form.inviteCode.trim().toUpperCase();
+    if (code.length < 4) {
+      setLookup('idle');
+      setClassInfo(null);
+      return;
+    }
+
+    setLookup('checking');
+    const epoch = ++lookupEpoch.current;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await portalFetch<ClassInfo>(
+          `/api/auth/invite-lookup?code=${encodeURIComponent(code)}`
+        );
+        if (lookupEpoch.current !== epoch) return;
+        setClassInfo(res);
+        setLookup('found');
+      } catch {
+        if (lookupEpoch.current !== epoch) return;
+        setClassInfo(null);
+        setLookup('invalid');
+      }
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [form.inviteCode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
+    if (lookup !== 'found' || !classInfo) {
+      setError('请先填写有效的班级邀请码，并等待班级信息确认');
+      return;
+    }
     if (form.username.trim().length < 3) {
       setError('用户名至少需要 3 个字符（仅支持字母、数字、下划线）');
       return;
@@ -32,16 +81,8 @@ export default function StudentRegisterPage() {
       setError('密码长度不能少于 6 位');
       return;
     }
-    if (form.password !== form.confirmPassword) {
-      setError('两次输入的密码不一致');
-      return;
-    }
-    if (!form.realName.trim() || !form.className.trim()) {
-      setError('请完整填写真实姓名和班级');
-      return;
-    }
-    if (!form.inviteCode.trim()) {
-      setError('请填写任课教师提供的班级邀请码');
+    if (!form.realName.trim()) {
+      setError('请填写真实姓名');
       return;
     }
 
@@ -52,10 +93,10 @@ export default function StudentRegisterPage() {
         body: JSON.stringify({
           username: form.username.trim(),
           password: form.password,
-          confirmPassword: form.confirmPassword,
+          confirmPassword: form.password,
           realName: form.realName.trim(),
-          grade: form.grade,
-          className: form.className.trim(),
+          grade: classInfo.grade,
+          className: classInfo.name,
           inviteCode: form.inviteCode.trim(),
         }),
       });
@@ -77,7 +118,7 @@ export default function StudentRegisterPage() {
           </div>
           <h1 className="text-xl font-bold text-slate-900">学生账号注册</h1>
           <p className="text-sm text-slate-500">
-            填写任课教师提供的班级邀请码加入班级参与模拟考试
+            输入任课教师提供的班级邀请码即可加入班级
           </p>
         </div>
 
@@ -94,13 +135,38 @@ export default function StudentRegisterPage() {
             </label>
             <input
               type="text"
+              autoFocus
               value={form.inviteCode}
               onChange={(e) =>
                 setForm({ ...form, inviteCode: e.target.value.toUpperCase() })
               }
-              placeholder="请输入教师提供的班级邀请码"
-              className="w-full h-9 px-3 rounded-lg border border-slate-300 text-sm font-mono uppercase focus:outline-none focus:border-sky-600"
+              placeholder="例如：A3K7MP"
+              className="w-full h-9 px-3 rounded-lg border border-slate-300 text-sm font-mono uppercase tracking-widest focus:outline-none focus:border-sky-600"
             />
+            {lookup === 'checking' && (
+              <p className="flex items-center gap-1.5 text-xs text-slate-400 pt-1">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                正在验证邀请码…
+              </p>
+            )}
+            {lookup === 'found' && classInfo && (
+              <div className="flex items-center gap-2 p-2.5 rounded-lg bg-teal-50 border border-teal-200 text-xs text-teal-800">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>
+                  已找到班级：
+                  <span className="font-bold">
+                    {classInfo.name}（{classInfo.grade}）
+                  </span>
+                  ，请继续填写下方信息
+                </span>
+              </div>
+            )}
+            {lookup === 'invalid' && (
+              <div className="flex items-center gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                <XCircle className="w-4 h-4 shrink-0" />
+                <span>邀请码无效，请核对后重新输入，或向任课教师确认</span>
+              </div>
+            )}
           </div>
 
           <div className="space-y-1">
@@ -116,44 +182,15 @@ export default function StudentRegisterPage() {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="block text-xs font-medium text-slate-700">
-                真实姓名
-              </label>
-              <input
-                type="text"
-                value={form.realName}
-                onChange={(e) => setForm({ ...form, realName: e.target.value })}
-                placeholder="请输入真实姓名"
-                className="w-full h-9 px-3 rounded-lg border border-slate-300 text-sm focus:outline-none focus:border-sky-600"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="block text-xs font-medium text-slate-700">
-                年级
-              </label>
-              <select
-                value={form.grade}
-                onChange={(e) => setForm({ ...form, grade: e.target.value })}
-                className="w-full h-9 px-3 rounded-lg border border-slate-300 text-sm bg-white focus:outline-none focus:border-sky-600"
-              >
-                <option value="高一">高一</option>
-                <option value="高二">高二</option>
-                <option value="高三">高三</option>
-              </select>
-            </div>
-          </div>
-
           <div className="space-y-1">
             <label className="block text-xs font-medium text-slate-700">
-              班级名称
+              真实姓名
             </label>
             <input
               type="text"
-              value={form.className}
-              onChange={(e) => setForm({ ...form, className: e.target.value })}
-              placeholder="例如：高一(1)班"
+              value={form.realName}
+              onChange={(e) => setForm({ ...form, realName: e.target.value })}
+              placeholder="请输入真实姓名"
               className="w-full h-9 px-3 rounded-lg border border-slate-300 text-sm focus:outline-none focus:border-sky-600"
             />
           </div>
@@ -162,28 +199,27 @@ export default function StudentRegisterPage() {
             <label className="block text-xs font-medium text-slate-700">
               密码（至少 6 位）
             </label>
-            <input
-              type="password"
-              value={form.password}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-              placeholder="至少 6 位字符"
-              className="w-full h-9 px-3 rounded-lg border border-slate-300 text-sm focus:outline-none focus:border-sky-600"
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="block text-xs font-medium text-slate-700">
-              确认密码
-            </label>
-            <input
-              type="password"
-              value={form.confirmPassword}
-              onChange={(e) =>
-                setForm({ ...form, confirmPassword: e.target.value })
-              }
-              placeholder="请再次输入密码"
-              className="w-full h-9 px-3 rounded-lg border border-slate-300 text-sm focus:outline-none focus:border-sky-600"
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                placeholder="至少 6 位字符"
+                className="w-full h-9 px-3 pr-10 rounded-lg border border-slate-300 text-sm focus:outline-none focus:border-sky-600"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600"
+              >
+                {showPassword ? (
+                  <EyeOff className="w-4 h-4" />
+                ) : (
+                  <Eye className="w-4 h-4" />
+                )}
+              </button>
+            </div>
           </div>
 
           <button
@@ -192,7 +228,7 @@ export default function StudentRegisterPage() {
             className="w-full h-10 mt-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white font-medium rounded-lg text-sm transition-colors flex items-center justify-center gap-2"
           >
             {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-            <span>{loading ? '正在注册...' : '验证邀请码并注册'}</span>
+            <span>{loading ? '正在注册...' : '注册并加入班级'}</span>
           </button>
         </form>
 

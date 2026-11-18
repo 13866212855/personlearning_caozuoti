@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { getDb } from '../db';
 import {
   type AuthedRequest,
+  inviteLookupRateLimiter,
   loginRateLimiter,
   requirePortalAuth,
   signPortalToken,
@@ -34,6 +35,30 @@ const RegisterSchema = z
 const LoginSchema = z.object({
   username: z.string().trim().min(1, '请输入用户名'),
   password: z.string().min(1, '请输入密码'),
+});
+
+// Public, rate-limited class lookup for the registration page. The invite
+// code alone identifies the class, so the page shows its authoritative
+// name/grade instead of asking students to type (and possibly mistype) them.
+router.get('/invite-lookup', inviteLookupRateLimiter, (req, res) => {
+  const code = String(req.query.code ?? '').trim();
+  if (code.length < 4 || code.length > 20) {
+    res.status(400).json({ error: '请输入教师提供的班级邀请码' });
+    return;
+  }
+
+  const db = getDb();
+  const cls = db
+    .prepare(
+      'SELECT name, grade FROM classes WHERE UPPER(invite_code) = UPPER(?)'
+    )
+    .get(code) as { name: string; grade: string } | undefined;
+  if (!cls) {
+    res.status(404).json({ error: '邀请码无效，请向任课教师确认' });
+    return;
+  }
+
+  res.json({ name: cls.name, grade: cls.grade });
 });
 
 // Student self-registration ONLY (requires valid teacher class invite code)
