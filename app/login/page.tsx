@@ -3,11 +3,13 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { BookOpen, Loader2 } from 'lucide-react';
+import { BookOpen, Eye, EyeOff, Loader2 } from 'lucide-react';
 import {
   clearPortalToken,
+  getCachedPortalUser,
   getPortalToken,
   portalFetch,
+  setCachedPortalUser,
   setPortalToken,
 } from '@/lib/api';
 import type { PortalUser } from '@/lib/types';
@@ -16,35 +18,77 @@ export default function PortalLoginPage() {
   const router = useRouter();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState<'idle' | 'submitting' | 'redirecting'>(
+    'idle'
+  );
+  const [resumingSession, setResumingSession] = useState(false);
 
   useEffect(() => {
-    const token = getPortalToken();
-    if (!token) return;
-    portalFetch<{ user: PortalUser }>('/api/auth/me')
-      .then((res) => {
+    router.prefetch('/');
+    router.prefetch('/register');
+    router.prefetch('/teacher');
+
+    let cancelled = false;
+    (async () => {
+      await Promise.resolve();
+      if (cancelled) return;
+
+      const token = getPortalToken();
+      if (!token) return;
+
+      const cached = getCachedPortalUser();
+      if (cached) {
+        if (cached.role === 'teacher') {
+          setResumingSession(true);
+          router.replace('/teacher');
+          return;
+        }
+        if (cached.role === 'student') {
+          setResumingSession(true);
+          router.replace('/');
+          return;
+        }
+      }
+
+      setResumingSession(true);
+      try {
+        const res = await portalFetch<{ user: PortalUser }>('/api/auth/me');
+        if (cancelled) return;
+        setCachedPortalUser(res.user);
         if (res.user.role === 'teacher') {
           router.replace('/teacher');
         } else if (res.user.role === 'student') {
           router.replace('/');
         } else {
           clearPortalToken();
+          setResumingSession(false);
         }
-      })
-      .catch(() => {
-        clearPortalToken();
-      });
+      } catch {
+        if (!cancelled) {
+          clearPortalToken();
+          setResumingSession(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
+
+  const busy = status !== 'idle';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (busy) return;
     setError('');
     if (!username.trim() || !password) {
       setError('请输入用户名和密码');
       return;
     }
-    setLoading(true);
+    setStatus('submitting');
     try {
       const res = await portalFetch<{ token: string; user: PortalUser }>(
         '/api/auth/login',
@@ -54,6 +98,10 @@ export default function PortalLoginPage() {
         }
       );
       setPortalToken(res.token);
+      if (res.user) {
+        setCachedPortalUser(res.user);
+      }
+      setStatus('redirecting');
       if (res.user.role === 'teacher') {
         router.replace('/teacher');
       } else {
@@ -61,10 +109,28 @@ export default function PortalLoginPage() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : '账号或密码错误');
-    } finally {
-      setLoading(false);
+      setStatus('idle');
     }
   };
+
+  if (resumingSession) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 gap-3">
+        <Loader2 className="w-6 h-6 text-sky-600 animate-spin" />
+        <p className="text-sm text-slate-600">正在恢复登录状态，请稍候...</p>
+        <button
+          type="button"
+          onClick={() => {
+            clearPortalToken();
+            setResumingSession(false);
+          }}
+          className="text-xs text-sky-700 hover:underline mt-1"
+        >
+          切换其他账号登录
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
@@ -98,11 +164,13 @@ export default function PortalLoginPage() {
             <input
               id="username"
               type="text"
+              autoFocus
               autoComplete="username"
+              disabled={busy}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               placeholder="请输入个人用户名"
-              className="w-full h-10 px-3.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-600"
+              className="w-full h-10 px-3.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-600 disabled:bg-slate-50"
             />
           </div>
 
@@ -113,24 +181,45 @@ export default function PortalLoginPage() {
             >
               密码
             </label>
-            <input
-              id="password"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="请输入登录密码"
-              className="w-full h-10 px-3.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-600"
-            />
+            <div className="relative">
+              <input
+                id="password"
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="current-password"
+                disabled={busy}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="请输入登录密码"
+                className="w-full h-10 px-3.5 pr-10 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-600 disabled:bg-slate-50"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600"
+              >
+                {showPassword ? (
+                  <EyeOff className="w-4 h-4" />
+                ) : (
+                  <Eye className="w-4 h-4" />
+                )}
+              </button>
+            </div>
           </div>
 
           <button
             type="submit"
-            disabled={loading}
-            className="w-full h-10 bg-sky-600 hover:bg-sky-700 disabled:opacity-60 text-white font-medium rounded-lg text-sm transition-colors flex items-center justify-center gap-2"
+            disabled={busy}
+            className="w-full h-10 bg-sky-600 hover:bg-sky-700 disabled:opacity-70 text-white font-medium rounded-lg text-sm transition-colors flex items-center justify-center gap-2"
           >
-            {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-            <span>{loading ? '正在登录...' : '登录'}</span>
+            {busy && <Loader2 className="w-4 h-4 animate-spin" />}
+            <span>
+              {status === 'redirecting'
+                ? '登录成功，正在进入系统...'
+                : status === 'submitting'
+                  ? '正在登录...'
+                  : '登录'}
+            </span>
           </button>
         </form>
 

@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
+  AlertCircle,
   ArrowRight,
   Award,
   CalendarClock,
@@ -11,10 +13,17 @@ import {
   FileSpreadsheet,
   Loader2,
   Play,
+  RefreshCw,
   RotateCw,
 } from 'lucide-react';
 import StudentHeader from '@/components/StudentHeader';
-import { clearPortalToken, getPortalToken, portalFetch } from '@/lib/api';
+import {
+  clearPortalToken,
+  getCachedPortalUser,
+  getPortalToken,
+  portalFetch,
+  setCachedPortalUser,
+} from '@/lib/api';
 import type { PortalUser, StudentExamCard } from '@/lib/types';
 
 function formatTimeRange(startIso: string, endIso: string): string {
@@ -43,6 +52,7 @@ export default function StudentExamsHomePage() {
   const router = useRouter();
   const [user, setUser] = useState<PortalUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [redirectingToLogin, setRedirectingToLogin] = useState(false);
   const [tab, setTab] = useState<'active' | 'completed'>('active');
 
   const [pending, setPending] = useState<StudentExamCard[]>([]);
@@ -50,57 +60,148 @@ export default function StudentExamsHomePage() {
   const [completed, setCompleted] = useState<StudentExamCard[]>([]);
   const [err, setErr] = useState('');
 
-  useEffect(() => {
-    const token = getPortalToken();
-    if (!token) {
-      router.replace('/login');
-      return;
-    }
+  const loadDashboard = useCallback(
+    async (isCancelled: () => boolean) => {
+      await Promise.resolve();
+      if (isCancelled()) return;
+      const token = getPortalToken();
+      if (!token) {
+        setRedirectingToLogin(true);
+        setLoading(false);
+        router.replace('/login');
+        return;
+      }
 
-    let cancelled = false;
-    (async () => {
+      const cached = getCachedPortalUser();
+      if (cached?.role === 'student') {
+        setUser((prev) => prev ?? cached);
+      }
+
+      setErr('');
+      setLoading(true);
       try {
-        const me = await portalFetch<{ user: PortalUser }>('/api/auth/me');
-        if (cancelled) return;
+        // Fetch current user & assigned exams in parallel to eliminate sequential waterfall
+        const mePromise = portalFetch<{ user: PortalUser }>('/api/auth/me');
+        const examsPromise = portalFetch<{
+          pending: StudentExamCard[];
+          inProgress: StudentExamCard[];
+          completed: StudentExamCard[];
+        }>('/api/exams').catch((examErr: unknown) => ({
+          __examError:
+            examErr instanceof Error ? examErr.message : '加载考试列表失败',
+        }));
+
+        const [me, examsRes] = await Promise.all([mePromise, examsPromise]);
+        if (isCancelled()) return;
+
         if (me.user.role === 'teacher') {
+          setCachedPortalUser(me.user);
           router.replace('/teacher');
           return;
         }
         if (me.user.role !== 'student') {
           clearPortalToken();
+          setRedirectingToLogin(true);
           router.replace('/login');
           return;
         }
+
+        setCachedPortalUser(me.user);
         setUser(me.user);
 
-        const data = await portalFetch<{
-          pending: StudentExamCard[];
-          inProgress: StudentExamCard[];
-          completed: StudentExamCard[];
-        }>('/api/exams');
-        if (cancelled) return;
-        setPending(data.pending);
-        setInProgress(data.inProgress);
-        setCompleted(data.completed);
-      } catch (e) {
-        if (!cancelled) {
-          setErr(e instanceof Error ? e.message : '加载考试列表失败');
-          if (!getPortalToken()) router.replace('/login');
+        if ('__examError' in examsRes) {
+          setErr(examsRes.__examError);
+        } else {
+          setPending(examsRes.pending);
+          setInProgress(examsRes.inProgress);
+          setCompleted(examsRes.completed);
         }
+      } catch (e) {
+        if (isCancelled()) return;
+        if (!getPortalToken()) {
+          setRedirectingToLogin(true);
+          router.replace('/login');
+          return;
+        }
+        setErr(e instanceof Error ? e.message : '加载考试信息失败，请重试');
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!isCancelled()) setLoading(false);
       }
-    })();
+    },
+    [router]
+  );
 
+  useEffect(() => {
+    router.prefetch('/login');
+    let cancelled = false;
+    void Promise.resolve().then(() => {
+      if (!cancelled) {
+        void loadDashboard(() => cancelled);
+      }
+    });
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [loadDashboard, router]);
 
-  if (loading || !user) {
+  if (redirectingToLogin) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 gap-3 text-center">
         <Loader2 className="w-6 h-6 text-sky-600 animate-spin" />
+        <p className="text-sm text-slate-600">正在前往登录页面...</p>
+        <Link
+          href="/login"
+          className="text-xs text-sky-700 font-medium hover:underline"
+        >
+          如未自动跳转，请点击这里登录
+        </Link>
+      </div>
+    );
+  }
+
+  // Only show centered loader when no cached user is available AND initial load hasn't errored
+  if (!user && loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 gap-3">
+        <Loader2 className="w-6 h-6 text-sky-600 animate-spin" />
+        <p className="text-sm text-slate-600">正在进入模拟考试中心...</p>
+      </div>
+    );
+  }
+
+  // Never trap user in endless spinner if initial auth/network call failed
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl p-6 text-center space-y-4">
+          <AlertCircle className="w-8 h-8 text-red-500 mx-auto" />
+          <div className="space-y-1">
+            <h1 className="text-base font-bold text-slate-900">页面加载失败</h1>
+            <p className="text-xs text-slate-600">
+              {err || '无法连接服务器获取学习信息，请检查网络后重试。'}
+            </p>
+          </div>
+          <div className="flex items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={() => void loadDashboard(() => false)}
+              className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>重新加载</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                clearPortalToken();
+                router.replace('/login');
+              }}
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-medium"
+            >
+              返回登录页
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -128,22 +229,29 @@ export default function StudentExamsHomePage() {
             <div>
               <div className="text-slate-500">进行中 / 待完成</div>
               <div className="text-2xl font-bold text-sky-700 mt-0.5">
-                {activeCards.length}
+                {loading ? '—' : activeCards.length}
               </div>
             </div>
             <div className="h-8 w-px bg-slate-200" />
             <div>
               <div className="text-slate-500">已完成考试</div>
               <div className="text-2xl font-bold text-teal-700 mt-0.5">
-                {completed.length}
+                {loading ? '—' : completed.length}
               </div>
             </div>
           </div>
         </section>
 
         {err && (
-          <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700">
-            {err}
+          <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 flex items-center justify-between gap-3">
+            <span>{err}</span>
+            <button
+              type="button"
+              onClick={() => void loadDashboard(() => false)}
+              className="px-3 py-1 bg-white border border-red-200 hover:bg-red-100 rounded-lg font-medium shrink-0"
+            >
+              重新加载
+            </button>
           </div>
         )}
 
@@ -158,7 +266,7 @@ export default function StudentExamsHomePage() {
                 : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
             }`}
           >
-            待完成与进行中（{activeCards.length}）
+            待完成与进行中（{loading ? '…' : activeCards.length}）
           </button>
           <button
             type="button"
@@ -169,199 +277,228 @@ export default function StudentExamsHomePage() {
                 : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
             }`}
           >
-            已完成考试（{completed.length}）
+            已完成考试（{loading ? '…' : completed.length}）
           </button>
         </div>
 
-        {/* Active & Pending Exams */}
-        {tab === 'active' && (
-          <section className="space-y-4">
-            {activeCards.length === 0 ? (
-              <div className="bg-white border border-slate-200 rounded-2xl py-16 text-center space-y-2">
-                <FileSpreadsheet className="w-8 h-8 text-slate-300 mx-auto" />
-                <p className="text-sm font-medium text-slate-700">
-                  暂无待参加的模拟考试
-                </p>
-                <p className="text-xs text-slate-500">
-                  任课教师发布新考试或专项补练后，将自动出现在此处并发送通知。
-                </p>
+        {/* Loading Skeleton while exam list fetches */}
+        {loading && activeCards.length === 0 && completed.length === 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4 animate-pulse"
+              >
+                <div className="h-3 w-24 bg-slate-200 rounded" />
+                <div className="h-5 w-3/4 bg-slate-200 rounded" />
+                <div className="h-10 w-full bg-slate-100 rounded" />
+                <div className="h-10 w-full bg-slate-200 rounded-xl" />
               </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {activeCards.map((exam) => (
-                  <article
-                    key={exam.id}
-                    className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col justify-between gap-4 hover:border-sky-300 transition-colors"
-                  >
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between gap-2 text-xs">
-                        <span
-                          className={`font-semibold ${
-                            exam.hasInProgress
-                              ? 'text-amber-700'
-                              : exam.canEnter
-                                ? 'text-sky-700'
-                                : 'text-slate-500'
-                          }`}
-                        >
-                          {exam.hasInProgress
-                            ? '作答进行中'
-                            : exam.canEnter
-                              ? '可进入作答'
-                              : exam.statusReason || '暂不可进入'}
-                        </span>
-                        <span className="text-slate-500">
-                          {exam.teacherName}
-                        </span>
-                      </div>
-
-                      <div>
-                        <h2 className="text-base font-bold text-slate-900">
-                          {exam.title}
-                        </h2>
-                        {exam.description && (
-                          <p className="text-xs text-slate-600 mt-1 line-clamp-2 leading-relaxed">
-                            {exam.description}
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-y-1.5 text-xs text-slate-600 pt-2 border-t border-slate-100 tabular-nums">
-                        <div className="flex items-center gap-1.5">
-                          <FileSpreadsheet className="w-3.5 h-3.5 text-slate-400" />
-                          <span>
-                            {exam.questionCount} 题 · 满分 {exam.totalScore} 分
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <Clock className="w-3.5 h-3.5 text-slate-400" />
-                          <span>限时 {exam.duration} 分钟</span>
-                        </div>
-                        <div className="col-span-2 flex items-center gap-1.5 text-slate-500">
-                          <CalendarClock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                          <span>
-                            {formatTimeRange(exam.startTime, exam.endTime)}
-                          </span>
-                        </div>
-                        {exam.hasInProgress && exam.remainingSeconds !== null && (
-                          <div className="col-span-2 text-amber-700 font-medium">
-                            已保存草稿 · 剩余时间约 {formatSec(exam.remainingSeconds)}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      disabled={!exam.canEnter && !exam.hasInProgress}
-                      onClick={() => router.push(`/exam?examId=${exam.id}`)}
-                      className={`w-full h-10 rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-colors ${
-                        exam.hasInProgress
-                          ? 'bg-amber-600 hover:bg-amber-700 text-white'
-                          : exam.canEnter
-                            ? 'bg-sky-600 hover:bg-sky-700 text-white'
-                            : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                      }`}
-                    >
-                      {exam.hasInProgress ? (
-                        <>
-                          <RotateCw className="w-4 h-4" />
-                          <span>继续作答</span>
-                        </>
-                      ) : (
-                        <>
-                          <Play className="w-4 h-4" />
-                          <span>进入考试</span>
-                        </>
-                      )}
-                    </button>
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
-        )}
-
-        {/* Completed Exams */}
-        {tab === 'completed' && (
-          <section className="space-y-4">
-            {completed.length === 0 ? (
-              <div className="bg-white border border-slate-200 rounded-2xl py-16 text-center text-sm text-slate-500">
-                暂无已完成的考试记录
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {completed.map((exam) => (
-                  <article
-                    key={exam.id}
-                    className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col justify-between gap-4"
-                  >
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="inline-flex items-center gap-1 text-teal-700 font-semibold">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          已完成（{exam.attemptsUsed}/{exam.maxAttempts} 次）
-                        </span>
-                        <span className="text-slate-500">
-                          {exam.teacherName}
-                        </span>
-                      </div>
-
-                      <h2 className="text-base font-bold text-slate-900">
-                        {exam.title}
-                      </h2>
-
-                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between text-xs">
-                        <span className="text-slate-600 flex items-center gap-1.5">
-                          <Award className="w-4 h-4 text-sky-600" />
-                          <span>
-                            {exam.scorePolicy === 'latest'
-                              ? '最近提交成绩'
-                              : '历史最高成绩'}
-                          </span>
-                        </span>
-                        <span className="text-base font-bold text-sky-700 tabular-nums">
-                          {exam.displayScore !== null
-                            ? `${exam.displayScore} / ${exam.totalScore}`
-                            : '暂未公布'}
-                        </span>
-                      </div>
-
-                      {exam.lastSubmittedAt && (
-                        <div className="text-xs text-slate-500 tabular-nums">
-                          最近交卷：
-                          {new Date(exam.lastSubmittedAt).toLocaleString('zh-CN')}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          router.push(`/exam?examId=${exam.id}&mode=result`)
-                        }
-                        className="flex-1 h-9 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-medium flex items-center justify-center gap-1"
+            ))}
+          </div>
+        ) : (
+          <>
+            {/* Active & Pending Exams */}
+            {tab === 'active' && (
+              <section className="space-y-4">
+                {activeCards.length === 0 ? (
+                  <div className="bg-white border border-slate-200 rounded-2xl py-16 text-center space-y-2">
+                    <FileSpreadsheet className="w-8 h-8 text-slate-300 mx-auto" />
+                    <p className="text-sm font-medium text-slate-700">
+                      暂无待参加的模拟考试
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      任课教师发布新考试或专项补练后，将自动出现在此处并发送通知。
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {activeCards.map((exam) => (
+                      <article
+                        key={exam.id}
+                        className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col justify-between gap-4 hover:border-sky-300 transition-colors"
                       >
-                        <span>查看详情</span>
-                        <ArrowRight className="w-3.5 h-3.5" />
-                      </button>
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between gap-2 text-xs">
+                            <span
+                              className={`font-semibold ${
+                                exam.hasInProgress
+                                  ? 'text-amber-700'
+                                  : exam.canEnter
+                                    ? 'text-sky-700'
+                                    : 'text-slate-500'
+                              }`}
+                            >
+                              {exam.hasInProgress
+                                ? '作答进行中'
+                                : exam.canEnter
+                                  ? '可进入作答'
+                                  : exam.statusReason || '暂不可进入'}
+                            </span>
+                            <span className="text-slate-500">
+                              {exam.teacherName}
+                            </span>
+                          </div>
 
-                      {exam.canEnter && exam.attemptsUsed < exam.maxAttempts && (
+                          <div>
+                            <h2 className="text-base font-bold text-slate-900">
+                              {exam.title}
+                            </h2>
+                            {exam.description && (
+                              <p className="text-xs text-slate-600 mt-1 line-clamp-2 leading-relaxed">
+                                {exam.description}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-y-1.5 text-xs text-slate-600 pt-2 border-t border-slate-100 tabular-nums">
+                            <div className="flex items-center gap-1.5">
+                              <FileSpreadsheet className="w-3.5 h-3.5 text-slate-400" />
+                              <span>
+                                {exam.questionCount} 题 · 满分 {exam.totalScore}{' '}
+                                分
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <Clock className="w-3.5 h-3.5 text-slate-400" />
+                              <span>限时 {exam.duration} 分钟</span>
+                            </div>
+                            <div className="col-span-2 flex items-center gap-1.5 text-slate-500">
+                              <CalendarClock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <span>
+                                {formatTimeRange(exam.startTime, exam.endTime)}
+                              </span>
+                            </div>
+                            {exam.hasInProgress &&
+                              exam.remainingSeconds !== null && (
+                                <div className="col-span-2 text-amber-700 font-medium">
+                                  已保存草稿 · 剩余时间约{' '}
+                                  {formatSec(exam.remainingSeconds)}
+                                </div>
+                              )}
+                          </div>
+                        </div>
+
                         <button
                           type="button"
-                          onClick={() => router.push(`/exam?examId=${exam.id}`)}
-                          className="h-9 px-3.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-medium whitespace-nowrap"
+                          disabled={!exam.canEnter && !exam.hasInProgress}
+                          onClick={() =>
+                            router.push(`/exam?examId=${exam.id}`)
+                          }
+                          className={`w-full h-10 rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-colors ${
+                            exam.hasInProgress
+                              ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                              : exam.canEnter
+                                ? 'bg-sky-600 hover:bg-sky-700 text-white'
+                                : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                          }`}
                         >
-                          再次作答
+                          {exam.hasInProgress ? (
+                            <>
+                              <RotateCw className="w-4 h-4" />
+                              <span>继续作答</span>
+                            </>
+                          ) : (
+                            <>
+                              <Play className="w-4 h-4" />
+                              <span>进入考试</span>
+                            </>
+                          )}
                         </button>
-                      )}
-                    </div>
-                  </article>
-                ))}
-              </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
             )}
-          </section>
+
+            {/* Completed Exams */}
+            {tab === 'completed' && (
+              <section className="space-y-4">
+                {completed.length === 0 ? (
+                  <div className="bg-white border border-slate-200 rounded-2xl py-16 text-center text-sm text-slate-500">
+                    暂无已完成的考试记录
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {completed.map((exam) => (
+                      <article
+                        key={exam.id}
+                        className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col justify-between gap-4"
+                      >
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="inline-flex items-center gap-1 text-teal-700 font-semibold">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              已完成（{exam.attemptsUsed}/{exam.maxAttempts} 次）
+                            </span>
+                            <span className="text-slate-500">
+                              {exam.teacherName}
+                            </span>
+                          </div>
+
+                          <h2 className="text-base font-bold text-slate-900">
+                            {exam.title}
+                          </h2>
+
+                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between text-xs">
+                            <span className="text-slate-600 flex items-center gap-1.5">
+                              <Award className="w-4 h-4 text-sky-600" />
+                              <span>
+                                {exam.scorePolicy === 'latest'
+                                  ? '最近提交成绩'
+                                  : '历史最高成绩'}
+                              </span>
+                            </span>
+                            <span className="text-base font-bold text-sky-700 tabular-nums">
+                              {exam.displayScore !== null
+                                ? `${exam.displayScore} / ${exam.totalScore}`
+                                : '暂未公布'}
+                            </span>
+                          </div>
+
+                          {exam.lastSubmittedAt && (
+                            <div className="text-xs text-slate-500 tabular-nums">
+                              最近交卷：
+                              {new Date(exam.lastSubmittedAt).toLocaleString(
+                                'zh-CN'
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              router.push(`/exam?examId=${exam.id}&mode=result`)
+                            }
+                            className="flex-1 h-9 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-medium flex items-center justify-center gap-1"
+                          >
+                            <span>查看详情</span>
+                            <ArrowRight className="w-3.5 h-3.5" />
+                          </button>
+
+                          {exam.canEnter &&
+                            exam.attemptsUsed < exam.maxAttempts && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  router.push(`/exam?examId=${exam.id}`)
+                                }
+                                className="h-9 px-3.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-medium whitespace-nowrap"
+                              >
+                                再次作答
+                              </button>
+                            )}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+          </>
         )}
       </main>
     </div>

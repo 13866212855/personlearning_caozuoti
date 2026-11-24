@@ -421,7 +421,7 @@ router.get('/classes/:id/students', (req: AuthedRequest, res) => {
   });
 });
 
-router.post('/classes/:id/students', (req: AuthedRequest, res) => {
+router.post('/classes/:id/students', async (req: AuthedRequest, res) => {
   const schema = z.object({
     username: z
       .string()
@@ -460,7 +460,7 @@ router.post('/classes/:id/students', (req: AuthedRequest, res) => {
   }
 
   const id = `stu-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-  const hash = bcrypt.hashSync(parsed.data.password, 10);
+  const hash = await bcrypt.hash(parsed.data.password, 8);
   const now = new Date().toISOString();
 
   db.prepare(
@@ -486,7 +486,7 @@ router.post('/classes/:id/students', (req: AuthedRequest, res) => {
   res.status(201).json({ ok: true, studentId: id });
 });
 
-router.post('/classes/:id/import-csv', (req: AuthedRequest, res) => {
+router.post('/classes/:id/import-csv', async (req: AuthedRequest, res) => {
   const schema = z.object({
     csvText: z.string().min(1, '请粘贴或上传 CSV 内容'),
   });
@@ -516,6 +516,7 @@ router.post('/classes/:id/import-csv', (req: AuthedRequest, res) => {
   let createdCount = 0;
   const skipped: string[] = [];
   const now = new Date().toISOString();
+  const hashCache = new Map<string, string>();
 
   const insertStmt = db.prepare(
     `INSERT INTO users (
@@ -546,10 +547,15 @@ router.post('/classes/:id/import-csv', (req: AuthedRequest, res) => {
       continue;
     }
     const pwd = rawPwd.length >= 6 ? rawPwd : '123456';
+    let pwdHash = hashCache.get(pwd);
+    if (!pwdHash) {
+      pwdHash = await bcrypt.hash(pwd, 8);
+      hashCache.set(pwd, pwdHash);
+    }
     insertStmt.run(
       `stu-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${i}`,
       username,
-      bcrypt.hashSync(pwd, 10),
+      pwdHash,
       realName,
       cls.grade,
       cls.name,
@@ -587,7 +593,7 @@ router.delete('/classes/:id/students/:studentId', (req: AuthedRequest, res) => {
   res.json({ ok: true });
 });
 
-router.post('/students/:studentId/reset-password', (req: AuthedRequest, res) => {
+router.post('/students/:studentId/reset-password', async (req: AuthedRequest, res) => {
   const schema = z.object({
     newPassword: z.string().min(6, '密码不能少于 6 位').max(64),
   });
@@ -608,10 +614,11 @@ router.post('/students/:studentId/reset-password', (req: AuthedRequest, res) => 
     return;
   }
 
+  const newHash = await bcrypt.hash(parsed.data.newPassword, 8);
   db.prepare(
     'UPDATE users SET password_hash = ?, must_change_password = 1, updated_at = ? WHERE id = ?'
   ).run(
-    bcrypt.hashSync(parsed.data.newPassword, 10),
+    newHash,
     new Date().toISOString(),
     String(req.params.studentId)
   );

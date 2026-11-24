@@ -302,6 +302,15 @@ function runSchemaAndMigrations(db: Database.Database) {
       submitted_at TEXT,
       updated_at TEXT NOT NULL
     );
+
+    CREATE INDEX IF NOT EXISTS idx_users_role_teacher_class ON users(role, teacher_id, class_id);
+    CREATE INDEX IF NOT EXISTS idx_classes_teacher ON classes(teacher_id);
+    CREATE INDEX IF NOT EXISTS idx_exam_assignments_exam ON exam_assignments(exam_id);
+    CREATE INDEX IF NOT EXISTS idx_exam_assignments_target ON exam_assignments(target_type, target_id);
+    CREATE INDEX IF NOT EXISTS idx_exam_questions_exam ON exam_questions(exam_id);
+    CREATE INDEX IF NOT EXISTS idx_exam_submissions_exam_stu ON exam_submissions(exam_id, student_id, status);
+    CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, is_read, created_at);
+    CREATE INDEX IF NOT EXISTS idx_submissions_student_q ON submissions(student_id, question_id);
   `);
 
   // Non-destructive migration from legacy students & admins tables into users

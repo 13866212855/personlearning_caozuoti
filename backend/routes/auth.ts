@@ -43,7 +43,7 @@ const LoginSchema = z.object({
 });
 
 // Student self-registration ONLY (automatically binds to configured default teacher & class)
-router.post('/register', registerRateLimiter, (req, res) => {
+router.post('/register', registerRateLimiter, async (req, res) => {
   const parsed = RegisterSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({
@@ -71,7 +71,7 @@ router.post('/register', registerRateLimiter, (req, res) => {
     (className || '').trim() || defaultTarget?.className || '待分班';
 
   const id = `stu-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  const passwordHash = bcrypt.hashSync(password, 10);
+  const passwordHash = await bcrypt.hash(password, 8);
   const now = new Date().toISOString();
 
   db.prepare(
@@ -109,14 +109,16 @@ router.post('/register', registerRateLimiter, (req, res) => {
       grade: assignedGrade,
       className: assignedClassName,
       teacherId: assignedTeacherId,
+      teacherName: defaultTarget?.teacherName || '',
       classId: assignedClassId,
       mustChangePassword: false,
+      unreadNotifications: 0,
     },
   });
 });
 
 // Teacher & Student unified login (super_admin is strictly rejected here with generic error)
-router.post('/login', loginRateLimiter, (req, res) => {
+router.post('/login', loginRateLimiter, async (req, res) => {
   const parsed = LoginSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({
@@ -150,7 +152,7 @@ router.post('/login', loginRateLimiter, (req, res) => {
   if (
     !user ||
     user.role === 'super_admin' ||
-    !bcrypt.compareSync(password, user.password_hash)
+    !(await bcrypt.compare(password, user.password_hash))
   ) {
     res.status(401).json({ error: '账号或密码错误' });
     return;
@@ -160,6 +162,29 @@ router.post('/login', loginRateLimiter, (req, res) => {
     res.status(403).json({ error: '该账号已被禁用，请联系管理员或任课教师' });
     return;
   }
+
+  let teacherName = '';
+  let classDisplayName = user.class_name;
+  if (user.role === 'student') {
+    if (user.teacher_id) {
+      const t = db
+        .prepare('SELECT real_name, username FROM users WHERE id = ?')
+        .get(user.teacher_id) as { real_name: string; username: string } | undefined;
+      teacherName = t ? t.real_name || t.username : '';
+    }
+    if (user.class_id) {
+      const c = db
+        .prepare('SELECT name FROM classes WHERE id = ?')
+        .get(user.class_id) as { name: string } | undefined;
+      if (c) classDisplayName = c.name;
+    }
+  }
+
+  const unreadRow = db
+    .prepare(
+      'SELECT COUNT(*) as cnt FROM notifications WHERE user_id = ? AND is_read = 0'
+    )
+    .get(user.id) as { cnt: number };
 
   const token = signPortalToken({
     sub: user.id,
@@ -175,11 +200,13 @@ router.post('/login', loginRateLimiter, (req, res) => {
       role: user.role,
       realName: user.real_name,
       grade: user.grade,
-      className: user.class_name,
+      className: classDisplayName,
       studentNo: user.student_no,
       teacherId: user.teacher_id || '',
+      teacherName,
       classId: user.class_id || '',
       mustChangePassword: Boolean(user.must_change_password),
+      unreadNotifications: Number(unreadRow?.cnt || 0),
     },
   });
 });

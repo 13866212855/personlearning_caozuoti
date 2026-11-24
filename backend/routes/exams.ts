@@ -79,19 +79,47 @@ router.get('/', (req: AuthedRequest, res) => {
   const inProgress: Array<Record<string, unknown>> = [];
   const completed: Array<Record<string, unknown>> = [];
 
+  if (examRows.length === 0) {
+    res.json({ pending, inProgress, completed });
+    return;
+  }
+
+  const examIds = examRows.map((e) => String(e.id));
+  const placeholders = examIds.map(() => '?').join(', ');
+
+  const qInfoRows = db
+    .prepare(
+      `SELECT exam_id, COUNT(*) as cnt, COALESCE(SUM(score), 0) as total_score
+       FROM exam_questions
+       WHERE exam_id IN (${placeholders})
+       GROUP BY exam_id`
+    )
+    .all(...examIds) as Array<{
+    exam_id: string;
+    cnt: number;
+    total_score: number;
+  }>;
+  const qInfoMap = new Map(qInfoRows.map((r) => [r.exam_id, r]));
+
+  const allSubs = db
+    .prepare(
+      `SELECT * FROM exam_submissions
+       WHERE student_id = ? AND exam_id IN (${placeholders})
+       ORDER BY attempt_no DESC`
+    )
+    .all(student.id, ...examIds) as Array<Record<string, unknown>>;
+  const subsByExam = new Map<string, Array<Record<string, unknown>>>();
+  for (const s of allSubs) {
+    const eid = String(s.exam_id);
+    const list = subsByExam.get(eid) || [];
+    list.push(s);
+    subsByExam.set(eid, list);
+  }
+
   for (const e of examRows) {
     const examId = String(e.id);
-    const qInfo = db
-      .prepare(
-        'SELECT COUNT(*) as cnt, COALESCE(SUM(score), 0) as total_score FROM exam_questions WHERE exam_id = ?'
-      )
-      .get(examId) as { cnt: number; total_score: number };
-
-    const subs = db
-      .prepare(
-        'SELECT * FROM exam_submissions WHERE exam_id = ? AND student_id = ? ORDER BY attempt_no DESC'
-      )
-      .all(examId, student.id) as Array<Record<string, unknown>>;
+    const qInfo = qInfoMap.get(examId) || { cnt: 0, total_score: 0 };
+    const subs = subsByExam.get(examId) || [];
 
     const activeDraft = subs.find((s) => s.status === 'in_progress');
     const submittedSubs = subs.filter((s) => s.status === 'submitted');

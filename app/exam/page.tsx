@@ -16,7 +16,13 @@ import {
 import GradingReport from '@/components/GradingReport';
 import StudentHeader from '@/components/StudentHeader';
 import SimulatorRenderer from '@/components/simulators/SimulatorRenderer';
-import { getPortalToken, portalFetch } from '@/lib/api';
+import {
+  clearPortalToken,
+  getCachedPortalUser,
+  getPortalToken,
+  portalFetch,
+  setCachedPortalUser,
+} from '@/lib/api';
 import {
   TYPE_LABELS,
   type CheckpointResult,
@@ -125,43 +131,54 @@ function ExamContent() {
 
     let cancelled = false;
     (async () => {
+      await Promise.resolve();
+      if (cancelled) return;
+      const cached = getCachedPortalUser();
+      if (cached?.role === 'student') {
+        setUser((prev) => prev ?? cached);
+      }
+
       try {
-        const me = await portalFetch<{ user: PortalUser }>('/api/auth/me');
-        if (cancelled) return;
-        if (me.user.role === 'teacher') {
-          router.replace('/teacher');
-          return;
-        }
-        setUser(me.user);
+        const mePromise = portalFetch<{ user: PortalUser }>('/api/auth/me');
 
         if (modeParam === 'result') {
           const qs = subIdParam ? `?submissionId=${subIdParam}` : '';
-          const res = await portalFetch<{
-            exam: {
-              id: string;
-              title: string;
-              endTime: string;
-              showScoreImmediately: boolean;
-              showAnswerPolicy: 'immediate' | 'after_end' | 'never';
-            };
-            scoreVisible: boolean;
-            answerVisible: boolean;
-            submission: {
-              finalScore: number | null;
-              maxScore: number;
-              isLate: boolean;
-              teacherComment: string;
-            };
-            results: ResultItem[];
-            attempts: Array<{
-              id: string;
-              attemptNo: number;
-              finalScore: number | null;
-              maxScore: number;
-              submittedAt: string;
-            }>;
-          }>(`/api/exams/${examIdParam}/result${qs}`);
+          const [me, res] = await Promise.all([
+            mePromise,
+            portalFetch<{
+              exam: {
+                id: string;
+                title: string;
+                endTime: string;
+                showScoreImmediately: boolean;
+                showAnswerPolicy: 'immediate' | 'after_end' | 'never';
+              };
+              scoreVisible: boolean;
+              answerVisible: boolean;
+              submission: {
+                finalScore: number | null;
+                maxScore: number;
+                isLate: boolean;
+                teacherComment: string;
+              };
+              results: ResultItem[];
+              attempts: Array<{
+                id: string;
+                attemptNo: number;
+                finalScore: number | null;
+                maxScore: number;
+                submittedAt: string;
+              }>;
+            }>(`/api/exams/${examIdParam}/result${qs}`),
+          ]);
           if (cancelled) return;
+          if (me.user.role === 'teacher') {
+            setCachedPortalUser(me.user);
+            router.replace('/teacher');
+            return;
+          }
+          setCachedPortalUser(me.user);
+          setUser(me.user);
           setExamInfo({
             ...res.exam,
             antiCheatSwitch: false,
@@ -177,25 +194,35 @@ function ExamContent() {
             attempts: res.attempts,
           });
         } else {
-          const started = await portalFetch<{
-            exam: {
-              id: string;
-              title: string;
-              description: string;
-              duration: number;
-              endTime: string;
-              antiCheatSwitch: boolean;
-              showScoreImmediately: boolean;
-              showAnswerPolicy: 'immediate' | 'after_end' | 'never';
-            };
-            questions: ClientQuestion[];
-            answers: Record<string, SimulatorState>;
-            durationSeconds: number;
-            switchCount: number;
-            remainingSeconds: number;
-          }>(`/api/exams/${examIdParam}/start`, { method: 'POST' });
+          const [me, started] = await Promise.all([
+            mePromise,
+            portalFetch<{
+              exam: {
+                id: string;
+                title: string;
+                description: string;
+                duration: number;
+                endTime: string;
+                antiCheatSwitch: boolean;
+                showScoreImmediately: boolean;
+                showAnswerPolicy: 'immediate' | 'after_end' | 'never';
+              };
+              questions: ClientQuestion[];
+              answers: Record<string, SimulatorState>;
+              durationSeconds: number;
+              switchCount: number;
+              remainingSeconds: number;
+            }>(`/api/exams/${examIdParam}/start`, { method: 'POST' }),
+          ]);
 
           if (cancelled) return;
+          if (me.user.role === 'teacher') {
+            setCachedPortalUser(me.user);
+            router.replace('/teacher');
+            return;
+          }
+          setCachedPortalUser(me.user);
+          setUser(me.user);
           setExamInfo(started.exam);
           setQuestions(started.questions);
           const initAns: Record<string, SimulatorState> = {};
@@ -220,6 +247,10 @@ function ExamContent() {
         }
       } catch (e) {
         if (!cancelled) {
+          if (!getPortalToken()) {
+            router.replace('/login');
+            return;
+          }
           setError(e instanceof Error ? e.message : '加载模拟考试失败');
         }
       } finally {
@@ -342,30 +373,45 @@ function ExamContent() {
     return () => document.removeEventListener('visibilitychange', onVisChange);
   }, [examInfo?.antiCheatSwitch, resultView, questions.length]);
 
-  if (loading || !user) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <Loader2 className="w-6 h-6 text-sky-600 animate-spin" />
-      </div>
-    );
-  }
-
   if (error && !examInfo) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col">
-        <StudentHeader user={user} />
+        {user && <StudentHeader user={user} />}
         <main className="flex-1 flex flex-col items-center justify-center p-6 space-y-4">
           <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700 max-w-md text-center">
             {error}
           </div>
-          <button
-            type="button"
-            onClick={() => router.push('/')}
-            className="px-4 py-2 bg-sky-600 text-white rounded-lg text-sm font-medium"
-          >
-            返回模拟考试列表
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => router.push('/')}
+              className="px-4 py-2 bg-sky-600 text-white rounded-lg text-sm font-medium"
+            >
+              返回模拟考试列表
+            </button>
+            {!user && (
+              <button
+                type="button"
+                onClick={() => {
+                  clearPortalToken();
+                  router.replace('/login');
+                }}
+                className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg text-sm font-medium"
+              >
+                重新登录
+              </button>
+            )}
+          </div>
         </main>
+      </div>
+    );
+  }
+
+  if (loading || !user) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 gap-3">
+        <Loader2 className="w-6 h-6 text-sky-600 animate-spin" />
+        <p className="text-sm text-slate-600">正在加载模拟试卷...</p>
       </div>
     );
   }

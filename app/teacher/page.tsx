@@ -21,7 +21,13 @@ import TeacherExamsTab from '@/components/teacher/TeacherExamsTab';
 import TeacherOverviewTab from '@/components/teacher/TeacherOverviewTab';
 import TeacherQuestionStudioTab from '@/components/teacher/TeacherQuestionStudioTab';
 import TeacherSettingsTab from '@/components/teacher/TeacherSettingsTab';
-import { clearPortalToken, getPortalToken, portalFetch } from '@/lib/api';
+import {
+  clearPortalToken,
+  getCachedPortalUser,
+  getPortalToken,
+  portalFetch,
+  setCachedPortalUser,
+} from '@/lib/api';
 import type { PortalUser } from '@/lib/types';
 
 type TeacherTab =
@@ -43,16 +49,27 @@ export default function TeacherWorkbenchPage() {
   const [dismissPwdBanner, setDismissPwdBanner] = useState(false);
 
   useEffect(() => {
-    const token = getPortalToken();
-    if (!token) {
-      router.replace('/login');
-      return;
-    }
-
     let active = true;
-    portalFetch<{ user: PortalUser }>('/api/auth/me')
-      .then((res) => {
+    (async () => {
+      await Promise.resolve();
+      if (!active) return;
+
+      const token = getPortalToken();
+      if (!token) {
+        setChecking(false);
+        router.replace('/login');
+        return;
+      }
+
+      const cached = getCachedPortalUser();
+      if (cached?.role === 'teacher') {
+        setTeacher((prev) => prev ?? cached);
+      }
+
+      try {
+        const res = await portalFetch<{ user: PortalUser }>('/api/auth/me');
         if (!active) return;
+        setCachedPortalUser(res.user);
         if (res.user.role === 'student') {
           router.replace('/');
           return;
@@ -63,16 +80,15 @@ export default function TeacherWorkbenchPage() {
           return;
         }
         setTeacher(res.user);
-      })
-      .catch(() => {
+      } catch {
         if (active) {
           clearPortalToken();
           router.replace('/login');
         }
-      })
-      .finally(() => {
+      } finally {
         if (active) setChecking(false);
-      });
+      }
+    })();
 
     return () => {
       active = false;
@@ -84,10 +100,13 @@ export default function TeacherWorkbenchPage() {
     router.push('/login');
   };
 
-  if (checking || !teacher) {
+  if (!teacher) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 gap-3">
         <Loader2 className="w-6 h-6 text-sky-600 animate-spin" />
+        <p className="text-sm text-slate-600">
+          {checking ? '正在进入教师教学工作台...' : '正在前往登录页面...'}
+        </p>
       </div>
     );
   }

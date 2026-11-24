@@ -15,7 +15,13 @@ import {
 } from 'lucide-react';
 import GradingReport from '@/components/GradingReport';
 import StudentHeader from '@/components/StudentHeader';
-import { clearPortalToken, getPortalToken, portalFetch } from '@/lib/api';
+import {
+  clearPortalToken,
+  getCachedPortalUser,
+  getPortalToken,
+  portalFetch,
+  setCachedPortalUser,
+} from '@/lib/api';
 import {
   TYPE_LABELS,
   type CheckpointResult,
@@ -100,6 +106,7 @@ function ProfileContent() {
   const [stats, setStats] = useState<StatsData | null>(null);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   // Change password state
   const [oldPassword, setOldPassword] = useState('');
@@ -145,10 +152,32 @@ function ProfileContent() {
 
     let cancelled = false;
     (async () => {
+      await Promise.resolve();
+      if (cancelled) return;
+      const cached = getCachedPortalUser();
+      if (cached?.role === 'student') {
+        setUser((prev) => prev ?? cached);
+      }
+
       try {
-        const me = await portalFetch<{ user: PortalUser }>('/api/auth/me');
+        const [me] = await Promise.all([
+          portalFetch<{ user: PortalUser }>('/api/auth/me'),
+          loadHistory(1).catch(() => undefined),
+          portalFetch<{ items: MistakeItem[] }>('/api/profile/mistakes')
+            .then((r) => {
+              if (!cancelled) setMistakes(r.items);
+            })
+            .catch(() => undefined),
+          portalFetch<StatsData>('/api/profile/stats')
+            .then((r) => {
+              if (!cancelled) setStats(r);
+            })
+            .catch(() => undefined),
+          loadNotifications().catch(() => undefined),
+        ]);
         if (cancelled) return;
         if (me.user.role === 'teacher') {
+          setCachedPortalUser(me.user);
           router.replace('/teacher');
           return;
         }
@@ -157,21 +186,18 @@ function ProfileContent() {
           router.replace('/login');
           return;
         }
+        setCachedPortalUser(me.user);
         setUser(me.user);
-        await Promise.all([
-          loadHistory(1),
-          portalFetch<{ items: MistakeItem[] }>('/api/profile/mistakes').then(
-            (r) => {
-              if (!cancelled) setMistakes(r.items);
-            }
-          ),
-          portalFetch<StatsData>('/api/profile/stats').then((r) => {
-            if (!cancelled) setStats(r);
-          }),
-          loadNotifications(),
-        ]);
-      } catch {
-        if (!cancelled) router.replace('/login');
+      } catch (e) {
+        if (!cancelled) {
+          if (!getPortalToken()) {
+            router.replace('/login');
+          } else {
+            setLoadError(
+              e instanceof Error ? e.message : '加载个人中心失败，请重试'
+            );
+          }
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -272,10 +298,47 @@ function ProfileContent() {
     }
   };
 
-  if (loading || !user) {
+  if (loadError && !user) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 gap-3 text-center">
+        <p className="text-sm text-red-600">{loadError}</p>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-sky-600 text-white rounded-lg text-xs font-medium"
+          >
+            重新加载
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              clearPortalToken();
+              router.replace('/login');
+            }}
+            className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg text-xs font-medium"
+          >
+            返回登录
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user && loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 gap-3">
         <Loader2 className="w-6 h-6 text-sky-600 animate-spin" />
+        <p className="text-sm text-slate-600">正在加载个人中心...</p>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 gap-3">
+        <Loader2 className="w-6 h-6 text-sky-600 animate-spin" />
+        <p className="text-sm text-slate-600">正在前往登录页面...</p>
       </div>
     );
   }
