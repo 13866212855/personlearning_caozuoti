@@ -1,0 +1,559 @@
+PS D:\development\claude\personlearning_caozuoti> .\redeploy.bat
+========================================
+ personlearning_caozuoti - Docker Deployment Script (Windows)
+========================================
+
+[1/5] Building Docker image 'personlearning_caozuoti:latest' ...
+      (dependencies install from lock file, with cache + auto-retry)
+[+] Building 212.9s (9/20)                                                                         docker:desktop-linux
+ => [internal] load build definition from Dockerfile                                                               7.6s
+ => => transferring dockerfile: 2.94kB                                                                             2.6s
+ => [internal] load metadata for docker.io/library/node:22-bookworm-slim                                          15.0s
+ => [internal] load .dockerignore                                                                                  0.2s
+ => => transferring context: 424B                                                                                  0.2s
+ => [builder 1/7] FROM docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7  0.6s
+ => => resolve docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9  0.4s
+ => [internal] load build context                                                                                  4.8s
+ => => transferring context: 596.40kB                                                                              4.5s
+ => CACHED [builder 2/7] WORKDIR /app                                                                              0.0s
+ => CACHED [builder 3/7] RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm   0.0s
+ => [builder 4/7] COPY package.json package-lock.json ./                                                           3.1s
+ => ERROR [builder 5/7] RUN --mount=type=cache,target=/root/.npm     ok=0;     for i in 1 2 3; do       echo "=  174.1s
+------
+ > [builder 5/7] RUN --mount=type=cache,target=/root/.npm     ok=0;     for i in 1 2 3; do       echo "== npm ci attempt $i ==";       npm ci --legacy-peer-deps --no-audit --no-fund --maxsockets=3 && ok=1 && break;       sleep 5;     done;     [ "$ok" = "1" ] || (echo "npm ci failed after 3 attempts" && exit 1):
+64.35 == npm ci attempt 1 ==
+138.5 npm error code EUSAGE
+138.5 npm error
+138.5 npm error `npm ci` can only install packages when your package.json and package-lock.json or npm-shrinkwrap.json are in sync. Please update your lock file with `npm install` before continuing.
+138.5 npm error
+138.5 npm error Invalid: lock file's tailwindcss@4.1.11 does not satisfy tailwindcss@3.4.19
+138.5 npm error Missing: arg@5.0.2 from lock file
+138.5 npm error Missing: chokidar@3.6.0 from lock file
+138.5 npm error Missing: didyoumean@1.2.2 from lock file
+138.5 npm error Missing: dlv@1.1.3 from lock file
+138.5 npm error Missing: fast-glob@3.3.3 from lock file
+138.5 npm error Missing: jiti@1.21.7 from lock file
+138.5 npm error Missing: lilconfig@3.1.5 from lock file
+138.5 npm error Missing: postcss-import@15.1.0 from lock file
+138.5 npm error Missing: postcss-js@4.1.0 from lock file
+138.5 npm error Missing: postcss-load-config@6.0.1 from lock file
+138.5 npm error Missing: postcss-nested@6.2.0 from lock file
+138.5 npm error Missing: postcss-selector-parser@6.1.6 from lock file
+138.5 npm error Missing: resolve@1.22.14 from lock file
+138.5 npm error Missing: sucrase@3.35.1 from lock file
+138.5 npm error Missing: read-cache@1.0.2 from lock file
+138.5 npm error Missing: resolve@1.22.14 from lock file
+138.5 npm error Missing: camelcase-css@2.0.1 from lock file
+138.5 npm error Missing: postcss-selector-parser@6.1.6 from lock file
+138.5 npm error Missing: commander@4.1.1 from lock file
+138.5 npm error Missing: lines-and-columns@1.2.4 from lock file
+138.5 npm error Missing: pirates@4.0.7 from lock file
+138.5 npm error Missing: ts-interface-checker@0.1.13 from lock file
+138.5 npm error Missing: anymatch@3.1.3 from lock file
+138.5 npm error Missing: fsevents@2.3.3 from lock file
+138.5 npm error Missing: glob-parent@5.1.2 from lock file
+138.5 npm error Missing: is-binary-path@2.1.0 from lock file
+138.5 npm error Missing: readdirp@3.6.0 from lock file
+138.5 npm error Missing: picomatch@2.3.2 from lock file
+138.5 npm error Missing: binary-extensions@2.3.0 from lock file
+138.5 npm error Missing: glob-parent@5.1.2 from lock file
+138.5 npm error Missing: picomatch@2.3.2 from lock file
+138.5 npm error
+138.5 npm error Clean install a project
+138.5 npm error
+138.5 npm error Usage:
+138.5 npm error npm ci
+138.5 npm error
+138.5 npm error Options:
+138.5 npm error [--install-strategy <hoisted|nested|shallow|linked>] [--legacy-bundling]
+138.5 npm error [--global-style] [--omit <dev|optional|peer> [--omit <dev|optional|peer> ...]]
+138.5 npm error [--include <prod|dev|optional|peer> [--include <prod|dev|optional|peer> ...]]
+138.5 npm error [--strict-peer-deps] [--foreground-scripts] [--ignore-scripts] [--no-audit]
+138.5 npm error [--no-bin-links] [--no-fund] [--dry-run]
+138.5 npm error [-w|--workspace <workspace-name> [-w|--workspace <workspace-name> ...]]
+138.5 npm error [-ws|--workspaces] [--include-workspace-root] [--install-links]
+138.5 npm error
+138.5 npm error aliases: clean-install, ic, install-clean, isntall-clean
+138.5 npm error
+138.5 npm error Run "npm help ci" for more info
+138.5 npm error A complete log of this run can be found in: /root/.npm/_logs/2026-11-24T07_15_09_103Z-debug-0.log
+161.9 == npm ci attempt 2 ==
+162.7 npm error code EUSAGE
+162.7 npm error
+162.7 npm error `npm ci` can only install packages when your package.json and package-lock.json or npm-shrinkwrap.json are in sync. Please update your lock file with `npm install` before continuing.
+162.7 npm error
+162.7 npm error Invalid: lock file's tailwindcss@4.1.11 does not satisfy tailwindcss@3.4.19
+162.7 npm error Missing: arg@5.0.2 from lock file
+162.7 npm error Missing: chokidar@3.6.0 from lock file
+162.7 npm error Missing: didyoumean@1.2.2 from lock file
+162.7 npm error Missing: dlv@1.1.3 from lock file
+162.7 npm error Missing: fast-glob@3.3.3 from lock file
+162.7 npm error Missing: jiti@1.21.7 from lock file
+162.7 npm error Missing: lilconfig@3.1.5 from lock file
+162.7 npm error Missing: postcss-import@15.1.0 from lock file
+162.7 npm error Missing: postcss-js@4.1.0 from lock file
+162.7 npm error Missing: postcss-load-config@6.0.1 from lock file
+162.7 npm error Missing: postcss-nested@6.2.0 from lock file
+162.7 npm error Missing: postcss-selector-parser@6.1.6 from lock file
+162.7 npm error Missing: resolve@1.22.14 from lock file
+162.7 npm error Missing: sucrase@3.35.1 from lock file
+162.7 npm error Missing: read-cache@1.0.2 from lock file
+162.7 npm error Missing: resolve@1.22.14 from lock file
+162.7 npm error Missing: camelcase-css@2.0.1 from lock file
+162.7 npm error Missing: postcss-selector-parser@6.1.6 from lock file
+162.7 npm error Missing: commander@4.1.1 from lock file
+162.7 npm error Missing: lines-and-columns@1.2.4 from lock file
+162.7 npm error Missing: pirates@4.0.7 from lock file
+162.7 npm error Missing: ts-interface-checker@0.1.13 from lock file
+162.7 npm error Missing: anymatch@3.1.3 from lock file
+162.7 npm error Missing: fsevents@2.3.3 from lock file
+162.7 npm error Missing: glob-parent@5.1.2 from lock file
+162.7 npm error Missing: is-binary-path@2.1.0 from lock file
+162.7 npm error Missing: readdirp@3.6.0 from lock file
+162.7 npm error Missing: picomatch@2.3.2 from lock file
+162.7 npm error Missing: binary-extensions@2.3.0 from lock file
+162.7 npm error Missing: glob-parent@5.1.2 from lock file
+162.7 npm error Missing: picomatch@2.3.2 from lock file
+162.7 npm error
+162.7 npm error Clean install a project
+162.7 npm error
+162.7 npm error Usage:
+162.7 npm error npm ci
+162.7 npm error
+162.7 npm error Options:
+162.7 npm error [--install-strategy <hoisted|nested|shallow|linked>] [--legacy-bundling]
+162.7 npm error [--global-style] [--omit <dev|optional|peer> [--omit <dev|optional|peer> ...]]
+162.7 npm error [--include <prod|dev|optional|peer> [--include <prod|dev|optional|peer> ...]]
+162.7 npm error [--strict-peer-deps] [--foreground-scripts] [--ignore-scripts] [--no-audit]
+162.7 npm error [--no-bin-links] [--no-fund] [--dry-run]
+162.7 npm error [-w|--workspace <workspace-name> [-w|--workspace <workspace-name> ...]]
+162.7 npm error [-ws|--workspaces] [--include-workspace-root] [--install-links]
+162.7 npm error
+162.7 npm error aliases: clean-install, ic, install-clean, isntall-clean
+162.7 npm error
+162.7 npm error Run "npm help ci" for more info
+162.7 npm error A complete log of this run can be found in: /root/.npm/_logs/2026-11-24T07_16_25_488Z-debug-0.log
+167.8 == npm ci attempt 3 ==
+168.5 npm error code EUSAGE
+168.5 npm error
+168.5 npm error `npm ci` can only install packages when your package.json and package-lock.json or npm-shrinkwrap.json are in sync. Please update your lock file with `npm install` before continuing.
+168.5 npm error
+168.5 npm error Invalid: lock file's tailwindcss@4.1.11 does not satisfy tailwindcss@3.4.19
+168.5 npm error Missing: arg@5.0.2 from lock file
+168.5 npm error Missing: chokidar@3.6.0 from lock file
+168.5 npm error Missing: didyoumean@1.2.2 from lock file
+168.5 npm error Missing: dlv@1.1.3 from lock file
+168.5 npm error Missing: fast-glob@3.3.3 from lock file
+168.5 npm error Missing: jiti@1.21.7 from lock file
+168.5 npm error Missing: lilconfig@3.1.5 from lock file
+168.5 npm error Missing: postcss-import@15.1.0 from lock file
+168.5 npm error Missing: postcss-js@4.1.0 from lock file
+168.5 npm error Missing: postcss-load-config@6.0.1 from lock file
+168.5 npm error Missing: postcss-nested@6.2.0 from lock file
+168.5 npm error Missing: postcss-selector-parser@6.1.6 from lock file
+168.5 npm error Missing: resolve@1.22.14 from lock file
+168.5 npm error Missing: sucrase@3.35.1 from lock file
+168.5 npm error Missing: read-cache@1.0.2 from lock file
+168.5 npm error Missing: resolve@1.22.14 from lock file
+168.5 npm error Missing: camelcase-css@2.0.1 from lock file
+168.5 npm error Missing: postcss-selector-parser@6.1.6 from lock file
+168.5 npm error Missing: commander@4.1.1 from lock file
+168.5 npm error Missing: lines-and-columns@1.2.4 from lock file
+168.5 npm error Missing: pirates@4.0.7 from lock file
+168.5 npm error Missing: ts-interface-checker@0.1.13 from lock file
+168.5 npm error Missing: anymatch@3.1.3 from lock file
+168.5 npm error Missing: fsevents@2.3.3 from lock file
+168.5 npm error Missing: glob-parent@5.1.2 from lock file
+168.5 npm error Missing: is-binary-path@2.1.0 from lock file
+168.5 npm error Missing: readdirp@3.6.0 from lock file
+168.5 npm error Missing: picomatch@2.3.2 from lock file
+168.5 npm error Missing: binary-extensions@2.3.0 from lock file
+168.5 npm error Missing: glob-parent@5.1.2 from lock file
+168.5 npm error Missing: picomatch@2.3.2 from lock file
+168.5 npm error
+168.5 npm error Clean install a project
+168.5 npm error
+168.5 npm error Usage:
+168.5 npm error npm ci
+168.5 npm error
+168.5 npm error Options:
+168.5 npm error [--install-strategy <hoisted|nested|shallow|linked>] [--legacy-bundling]
+168.5 npm error [--global-style] [--omit <dev|optional|peer> [--omit <dev|optional|peer> ...]]
+168.5 npm error [--include <prod|dev|optional|peer> [--include <prod|dev|optional|peer> ...]]
+168.5 npm error [--strict-peer-deps] [--foreground-scripts] [--ignore-scripts] [--no-audit]
+168.5 npm error [--no-bin-links] [--no-fund] [--dry-run]
+168.5 npm error [-w|--workspace <workspace-name> [-w|--workspace <workspace-name> ...]]
+168.5 npm error [-ws|--workspaces] [--include-workspace-root] [--install-links]
+168.5 npm error
+168.5 npm error aliases: clean-install, ic, install-clean, isntall-clean
+168.5 npm error
+168.5 npm error Run "npm help ci" for more info
+168.5 npm error A complete log of this run can be found in: /root/.npm/_logs/2026-11-24T07_16_31_334Z-debug-0.log
+173.5 npm ci failed after 3 attempts
+------
+Dockerfile:29
+--------------------
+  28 |     # cache mount 缓存已下载的包，即使失败重试也能续传
+  29 | >>> RUN --mount=type=cache,target=/root/.npm \
+  30 | >>>     ok=0; \
+  31 | >>>     for i in 1 2 3; do \
+  32 | >>>       echo "== npm ci attempt $i =="; \
+  33 | >>>       npm ci --legacy-peer-deps --no-audit --no-fund --maxsockets=3 && ok=1 && break; \
+  34 | >>>       sleep 5; \
+  35 | >>>     done; \
+  36 | >>>     [ "$ok" = "1" ] || (echo "npm ci failed after 3 attempts" && exit 1)
+  37 |
+--------------------
+ERROR: failed to build: failed to solve: process "/bin/sh -c ok=0;     for i in 1 2 3; do       echo \"== npm ci attempt $i ==\";       npm ci --legacy-peer-deps --no-audit --no-fund --maxsockets=3 && ok=1 && break;       sleep 5;     done;     [ \"$ok\" = \"1\" ] || (echo \"npm ci failed after 3 attempts\" && exit 1)" did not complete successfully: exit code: 1
+
+[WARNING] Build failed once. Retrying in 10s ...
+[+] Building 36.6s (8/20)                                                                                                                                                                   docker:desktop-linux
+ => [internal] load build definition from Dockerfile                                                                                                                                                        0.0s
+ => => transferring dockerfile: 2.94kB                                                                                                                                                                      0.0s
+ => [internal] load metadata for docker.io/library/node:22-bookworm-slim                                                                                                                                    0.4s
+ => [internal] load .dockerignore                                                                                                                                                                           0.1s
+ => => transferring context: 424B                                                                                                                                                                           0.0s
+ => [builder 1/7] FROM docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392                                                                      0.1s
+[+] Building 36.9s (8/20)                                                                                                                                                                   docker:desktop-linux
+ => [internal] load build definition from Dockerfile                                                                                                                                                        0.0s
+ => => transferring dockerfile: 2.94kB                                                                                                                                                                      0.0s
+ => [internal] load metadata for docker.io/library/node:22-bookworm-slim                                                                                                                                    0.4s
+ => [internal] load .dockerignore                                                                                                                                                                           0.1s
+ => => transferring context: 424B                                                                                                                                                                           0.0s
+ => [builder 1/7] FROM docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392                                                                      0.1s
+ => => resolve docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017[+] Building 36.9s (8/20)                                                                                                                                                                   docker:desktop-linux
+ => [internal] load build definition from Dockerfile                                                                                                                                                        0.0s
+ => => transferring dockerfile: 2.94kB                                                                                                                                                                      0.0s
+ => [internal] load metadata for docker.io/library/node:22-bookworm-slim                                                                                                                                    0.4ss python3 make g++ && rm -rf /va
+ => [internal] load .dockerignore                                                                                                                                                                           0.1s
+ => => transferring context: 424B                                                                                                                                                                           0.0s do       echo "== npm ci attemp
+ => [builder 1/7] FROM docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392                                                                      0.1s
+ => => resolve docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017[+] Building 37.1s (8/20)                                                                                                                                                                   docker:desktop-linux
+ => [internal] load build definition from Dockerfile                                                                                                                                                        0.0s
+ => => transferring dockerfile: 2.94kB                                                                                                                                                                      0.0s
+ => [internal] load metadata for docker.io/library/node:22-bookworm-slim                                                                                                                                    0.4ss python3 make g++ && rm -rf /va
+ => [internal] load .dockerignore                                                                                                                                                                           0.1s
+ => => transferring context: 424B                                                                                                                                                                           0.0s do       echo "== npm ci attemp
+ => [builder 1/7] FROM docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392                                                                      0.1s
+ => => resolve docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017[+] Building 37.2s (8/20)                                                                                                                                                                   docker:desktop-linux
+ => [internal] load build definition from Dockerfile                                                                                                                                                        0.0s
+ => => transferring dockerfile: 2.94kB                                                                                                                                                                      0.0s
+ => [internal] load metadata for docker.io/library/node:22-bookworm-slim                                                                                                                                    0.4ss python3 make g++ && rm -rf /va
+ => [internal] load .dockerignore                                                                                                                                                                           0.1s
+ => => transferring context: 424B                                                                                                                                                                           0.0s do       echo "== npm ci attemp
+ => [builder 1/7] FROM docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392                                                                      0.1s
+ => => resolve docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017[+] Building 37.4s (8/20)                                                                                                                                                                   docker:desktop-linux
+ => [internal] load build definition from Dockerfile                                                                                                                                                        0.0s
+ => => transferring dockerfile: 2.94kB                                                                                                                                                                      0.0s
+ => [internal] load metadata for docker.io/library/node:22-bookworm-slim                                                                                                                                    0.4ss python3 make g++ && rm -rf /va
+ => [internal] load .dockerignore                                                                                                                                                                           0.1s
+ => => transferring context: 424B                                                                                                                                                                           0.0s do       echo "== npm ci attemp
+ => [builder 1/7] FROM docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392                                                                      0.1s
+ => => resolve docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017[+] Building 37.5s (8/20)                                                                                                                                                                   docker:desktop-linux
+ => [internal] load build definition from Dockerfile                                                                                                                                                        0.0s
+ => => transferring dockerfile: 2.94kB                                                                                                                                                                      0.0s
+ => [internal] load metadata for docker.io/library/node:22-bookworm-slim                                                                                                                                    0.4ss python3 make g++ && rm -rf /va
+ => [internal] load .dockerignore                                                                                                                                                                           0.1s
+ => => transferring context: 424B                                                                                                                                                                           0.0s do       echo "== npm ci attemp
+ => [builder 1/7] FROM docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392                                                                      0.1s
+ => => resolve docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017[+] Building 37.7s (8/20)                                                                                                                                                                   docker:desktop-linux
+ => [internal] load build definition from Dockerfile                                                                                                                                                        0.0s
+ => => transferring dockerfile: 2.94kB                                                                                                                                                                      0.0s
+ => [internal] load metadata for docker.io/library/node:22-bookworm-slim                                                                                                                                    0.4ss python3 make g++ && rm -rf /va
+ => [internal] load .dockerignore                                                                                                                                                                           0.1s
+ => => transferring context: 424B                                                                                                                                                                           0.0s do       echo "== npm ci attemp
+ => [builder 1/7] FROM docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392                                                                      0.1s
+ => => resolve docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017[+] Building 37.8s (8/20)                                                                                                                                                                   docker:desktop-linux
+ => [internal] load build definition from Dockerfile                                                                                                                                                        0.0s
+ => => transferring dockerfile: 2.94kB                                                                                                                                                                      0.0s
+ => [internal] load metadata for docker.io/library/node:22-bookworm-slim                                                                                                                                    0.4ss python3 make g++ && rm -rf /va
+ => [internal] load .dockerignore                                                                                                                                                                           0.1s
+ => => transferring context: 424B                                                                                                                                                                           0.0s do       echo "== npm ci attemp
+ => [builder 1/7] FROM docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392                                                                      0.1s
+ => => resolve docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017[+] Building 38.0s (8/20)                                                                                                                                                                   docker:desktop-linux
+ => [internal] load build definition from Dockerfile                                                                                                                                                        0.0s
+ => => transferring dockerfile: 2.94kB                                                                                                                                                                      0.0s
+ => [internal] load metadata for docker.io/library/node:22-bookworm-slim                                                                                                                                    0.4ss python3 make g++ && rm -rf /va
+ => [internal] load .dockerignore                                                                                                                                                                           0.1s
+ => => transferring context: 424B                                                                                                                                                                           0.0s do       echo "== npm ci attemp
+ => [builder 1/7] FROM docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392                                                                      0.1s
+ => => resolve docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017[+] Building 38.1s (8/20)                                                                                                                                                                   docker:desktop-linux
+ => [internal] load build definition from Dockerfile                                                                                                                                                        0.0s
+ => => transferring dockerfile: 2.94kB                                                                                                                                                                      0.0s
+ => [internal] load metadata for docker.io/library/node:22-bookworm-slim                                                                                                                                    0.4ss python3 make g++ && rm -rf /va
+ => [internal] load .dockerignore                                                                                                                                                                           0.1s
+ => => transferring context: 424B                                                                                                                                                                           0.0s do       echo "== npm ci attemp
+ => [builder 1/7] FROM docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392                                                                      0.1s
+ => => resolve docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017[+] Building 38.3s (8/20)                                                                                                                                                                   docker:desktop-linux
+ => [internal] load build definition from Dockerfile                                                                                                                                                        0.0s
+ => => transferring dockerfile: 2.94kB                                                                                                                                                                      0.0s
+ => [internal] load metadata for docker.io/library/node:22-bookworm-slim                                                                                                                                    0.4ss python3 make g++ && rm -rf /va
+ => [internal] load .dockerignore                                                                                                                                                                           0.1s
+ => => transferring context: 424B                                                                                                                                                                           0.0s do       echo "== npm ci attemp
+ => [builder 1/7] FROM docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392                                                                      0.1s
+ => => resolve docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017[+] Building 38.4s (8/20)                                                                                                                                                                   docker:desktop-linux
+ => [internal] load build definition from Dockerfile                                                                                                                                                        0.0s
+ => => transferring dockerfile: 2.94kB                                                                                                                                                                      0.0s
+ => [internal] load metadata for docker.io/library/node:22-bookworm-slim                                                                                                                                    0.4ss python3 make g++ && rm -rf /va
+ => [internal] load .dockerignore                                                                                                                                                                           0.1s
+ => => transferring context: 424B                                                                                                                                                                           0.0s do       echo "== npm ci attemp
+ => [builder 1/7] FROM docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392                                                                      0.1s
+ => => resolve docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017[+] Building 38.6s (8/20)                                                                                                                                                                   docker:desktop-linux
+ => [internal] load build definition from Dockerfile                                                                                                                                                        0.0s
+ => => transferring dockerfile: 2.94kB                                                                                                                                                                      0.0s
+ => [internal] load metadata for docker.io/library/node:22-bookworm-slim                                                                                                                                    0.4ss python3 make g++ && rm -rf /va
+ => [internal] load .dockerignore                                                                                                                                                                           0.1s
+ => => transferring context: 424B                                                                                                                                                                           0.0s do       echo "== npm ci attemp
+ => [builder 1/7] FROM docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392                                                                      0.1s
+ => => resolve docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017[+] Building 38.7s (8/20)                                                                                                                                                                   docker:desktop-linux
+ => [internal] load build definition from Dockerfile                                                                                                                                                        0.0s
+ => => transferring dockerfile: 2.94kB                                                                                                                                                                      0.0s
+ => [internal] load metadata for docker.io/library/node:22-bookworm-slim                                                                                                                                    0.4ss python3 make g++ && rm -rf /va
+ => [internal] load .dockerignore                                                                                                                                                                           0.1s
+ => => transferring context: 424B                                                                                                                                                                           0.0s do       echo "== npm ci attemp
+ => [builder 1/7] FROM docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392                                                                      0.1s
+ => => resolve docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017[+] Building 38.9s (8/20)                                                                                                                                                                   docker:desktop-linux
+ => [internal] load build definition from Dockerfile                                                                                                                                                        0.0s
+ => => transferring dockerfile: 2.94kB                                                                                                                                                                      0.0s
+ => [internal] load metadata for docker.io/library/node:22-bookworm-slim                                                                                                                                    0.4ss python3 make g++ && rm -rf /va
+ => [internal] load .dockerignore                                                                                                                                                                           0.1s
+ => => transferring context: 424B                                                                                                                                                                           0.0s do       echo "== npm ci attemp
+ => [builder 1/7] FROM docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392                                                                      0.1s
+ => => resolve docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017[+] Building 39.0s (8/20)                                                                                                                                                                   docker:desktop-linux
+ => [internal] load build definition from Dockerfile                                                                                                                                                        0.0s
+ => => transferring dockerfile: 2.94kB                                                                                                                                                                      0.0s
+ => [internal] load metadata for docker.io/library/node:22-bookworm-slim                                                                                                                                    0.4ss python3 make g++ && rm -rf /va
+ => [internal] load .dockerignore                                                                                                                                                                           0.1s
+ => => transferring context: 424B                                                                                                                                                                           0.0s do       echo "== npm ci attemp
+ => [builder 1/7] FROM docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392                                                                      0.1s
+ => => resolve docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017[+] Building 39.2s (8/20)                                                                                                                                                                   docker:desktop-linux
+ => [internal] load build definition from Dockerfile                                                                                                                                                        0.0s
+ => => transferring dockerfile: 2.94kB                                                                                                                                                                      0.0s
+ => [internal] load metadata for docker.io/library/node:22-bookworm-slim                                                                                                                                    0.4ss python3 make g++ && rm -rf /va
+ => [internal] load .dockerignore                                                                                                                                                                           0.1s
+ => => transferring context: 424B                                                                                                                                                                           0.0s do       echo "== npm ci attemp
+ => [builder 1/7] FROM docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392                                                                      0.1s
+ => => resolve docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017[+] Building 39.3s (8/20)                                                                                                                                                                   docker:desktop-linux
+ => [internal] load build definition from Dockerfile                                                                                                                                                        0.0s
+ => => transferring dockerfile: 2.94kB                                                                                                                                                                      0.0s
+ => [internal] load metadata for docker.io/library/node:22-bookworm-slim                                                                                                                                    0.4ss python3 make g++ && rm -rf /va
+ => [internal] load .dockerignore                                                                                                                                                                           0.1s
+ => => transferring context: 424B                                                                                                                                                                           0.0s do       echo "== npm ci attemp
+ => [builder 1/7] FROM docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392                                                                      0.1s
+ => => resolve docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017[+] Building 39.5s (8/20)                                                                                                                                                                   docker:desktop-linux
+ => [internal] load build definition from Dockerfile                                                                                                                                                        0.0s
+ => => transferring dockerfile: 2.94kB                                                                                                                                                                      0.0s
+ => [internal] load metadata for docker.io/library/node:22-bookworm-slim                                                                                                                                    0.4ss python3 make g++ && rm -rf /va
+ => [internal] load .dockerignore                                                                                                                                                                           0.1s
+ => => transferring context: 424B                                                                                                                                                                           0.0s do       echo "== npm ci attemp
+ => [builder 1/7] FROM docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392                                                                      0.1s
+ => => resolve docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017[+] Building 77.3s (9/20)                                                                          docker:desktop-linux
+ => [internal] load build definition from Dockerfile                                                               0.0s
+ => => transferring dockerfile: 2.94kB                                                                             0.0s
+ => [internal] load metadata for docker.io/library/node:22-bookworm-slim                                           0.4s
+ => [internal] load .dockerignore                                                                                  0.1s
+ => => transferring context: 424B                                                                                  0.0s
+ => [builder 1/7] FROM docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7  0.1s
+ => => resolve docker.io/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9  0.1sa
+ => [internal] load build context                                                                                  0.0s
+ => => transferring context: 3.86kB                                                                                0.0s
+ => CACHED [builder 2/7] WORKDIR /app                                                                              0.0s
+ => CACHED [builder 3/7] RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm   0.0sp
+ => CACHED [builder 4/7] COPY package.json package-lock.json ./                                                    0.0s
+ => ERROR [builder 5/7] RUN --mount=type=cache,target=/root/.npm     ok=0;     for i in 1 2 3; do       echo "==  74.8s
+------
+ > [builder 5/7] RUN --mount=type=cache,target=/root/.npm     ok=0;     for i in 1 2 3; do       echo "== npm ci attempt $i ==";       npm ci --legacy-peer-deps --no-audit --no-fund --maxsockets=3 && ok=1 && break;       sleep 5;     done;     [ "$ok" = "1" ] || (echo "npm ci failed after 3 attempts" && exit 1):
+4.047 == npm ci attempt 1 ==
+38.03 npm error code EUSAGE
+38.03 npm error
+38.03 npm error `npm ci` can only install packages when your package.json and package-lock.json or npm-shrinkwrap.json are in sync. Please update your lock file with `npm install` before continuing.
+38.03 npm error
+38.03 npm error Invalid: lock file's tailwindcss@4.1.11 does not satisfy tailwindcss@3.4.19
+38.03 npm error Missing: arg@5.0.2 from lock file
+38.03 npm error Missing: chokidar@3.6.0 from lock file
+38.03 npm error Missing: didyoumean@1.2.2 from lock file
+38.03 npm error Missing: dlv@1.1.3 from lock file
+38.03 npm error Missing: fast-glob@3.3.3 from lock file
+38.03 npm error Missing: jiti@1.21.7 from lock file
+38.03 npm error Missing: lilconfig@3.1.5 from lock file
+38.03 npm error Missing: postcss-import@15.1.0 from lock file
+38.03 npm error Missing: postcss-js@4.1.0 from lock file
+38.03 npm error Missing: postcss-load-config@6.0.1 from lock file
+38.03 npm error Missing: postcss-nested@6.2.0 from lock file
+38.03 npm error Missing: postcss-selector-parser@6.1.6 from lock file
+38.03 npm error Missing: resolve@1.22.14 from lock file
+38.03 npm error Missing: sucrase@3.35.1 from lock file
+38.03 npm error Missing: read-cache@1.0.2 from lock file
+38.03 npm error Missing: resolve@1.22.14 from lock file
+38.03 npm error Missing: camelcase-css@2.0.1 from lock file
+38.03 npm error Missing: postcss-selector-parser@6.1.6 from lock file
+38.03 npm error Missing: commander@4.1.1 from lock file
+38.03 npm error Missing: lines-and-columns@1.2.4 from lock file
+38.03 npm error Missing: pirates@4.0.7 from lock file
+38.03 npm error Missing: ts-interface-checker@0.1.13 from lock file
+38.03 npm error Missing: anymatch@3.1.3 from lock file
+38.03 npm error Missing: fsevents@2.3.3 from lock file
+38.03 npm error Missing: glob-parent@5.1.2 from lock file
+38.03 npm error Missing: is-binary-path@2.1.0 from lock file
+38.03 npm error Missing: readdirp@3.6.0 from lock file
+38.03 npm error Missing: picomatch@2.3.2 from lock file
+38.03 npm error Missing: binary-extensions@2.3.0 from lock file
+38.03 npm error Missing: glob-parent@5.1.2 from lock file
+38.03 npm error Missing: picomatch@2.3.2 from lock file
+38.03 npm error
+38.03 npm error Clean install a project
+38.03 npm error
+38.03 npm error Usage:
+38.03 npm error npm ci
+38.03 npm error
+38.03 npm error Options:
+38.03 npm error [--install-strategy <hoisted|nested|shallow|linked>] [--legacy-bundling]
+38.03 npm error [--global-style] [--omit <dev|optional|peer> [--omit <dev|optional|peer> ...]]
+38.03 npm error [--include <prod|dev|optional|peer> [--include <prod|dev|optional|peer> ...]]
+38.03 npm error [--strict-peer-deps] [--foreground-scripts] [--ignore-scripts] [--no-audit]
+38.03 npm error [--no-bin-links] [--no-fund] [--dry-run]
+38.03 npm error [-w|--workspace <workspace-name> [-w|--workspace <workspace-name> ...]]
+38.03 npm error [-ws|--workspaces] [--include-workspace-root] [--install-links]
+38.03 npm error
+38.03 npm error aliases: clean-install, ic, install-clean, isntall-clean
+38.03 npm error
+38.03 npm error Run "npm help ci" for more info
+38.17 npm notice
+38.17 npm notice New major version of npm available! 10.9.9 -> 12.2.3
+38.17 npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.3
+38.17 npm notice To update run: npm install -g npm@12.2.3
+38.17 npm notice
+38.17 npm error A complete log of this run can be found in: /root/.npm/_logs/2026-11-24T07_16_57_753Z-debug-0.log
+62.32 == npm ci attempt 2 ==
+63.43 npm error code EUSAGE
+63.43 npm error
+63.43 npm error `npm ci` can only install packages when your package.json and package-lock.json or npm-shrinkwrap.json are in sync. Please update your lock file with `npm install` before continuing.
+63.43 npm error
+63.43 npm error Invalid: lock file's tailwindcss@4.1.11 does not satisfy tailwindcss@3.4.19
+63.43 npm error Missing: arg@5.0.2 from lock file
+63.43 npm error Missing: chokidar@3.6.0 from lock file
+63.43 npm error Missing: didyoumean@1.2.2 from lock file
+63.43 npm error Missing: dlv@1.1.3 from lock file
+63.43 npm error Missing: fast-glob@3.3.3 from lock file
+63.43 npm error Missing: jiti@1.21.7 from lock file
+63.43 npm error Missing: lilconfig@3.1.5 from lock file
+63.43 npm error Missing: postcss-import@15.1.0 from lock file
+63.43 npm error Missing: postcss-js@4.1.0 from lock file
+63.43 npm error Missing: postcss-load-config@6.0.1 from lock file
+63.43 npm error Missing: postcss-nested@6.2.0 from lock file
+63.43 npm error Missing: postcss-selector-parser@6.1.6 from lock file
+63.43 npm error Missing: resolve@1.22.14 from lock file
+63.43 npm error Missing: sucrase@3.35.1 from lock file
+63.43 npm error Missing: read-cache@1.0.2 from lock file
+63.43 npm error Missing: resolve@1.22.14 from lock file
+63.43 npm error Missing: camelcase-css@2.0.1 from lock file
+63.43 npm error Missing: postcss-selector-parser@6.1.6 from lock file
+63.43 npm error Missing: commander@4.1.1 from lock file
+63.43 npm error Missing: lines-and-columns@1.2.4 from lock file
+63.43 npm error Missing: pirates@4.0.7 from lock file
+63.43 npm error Missing: ts-interface-checker@0.1.13 from lock file
+63.43 npm error Missing: anymatch@3.1.3 from lock file
+63.43 npm error Missing: fsevents@2.3.3 from lock file
+63.43 npm error Missing: glob-parent@5.1.2 from lock file
+63.43 npm error Missing: is-binary-path@2.1.0 from lock file
+63.43 npm error Missing: readdirp@3.6.0 from lock file
+63.43 npm error Missing: picomatch@2.3.2 from lock file
+63.43 npm error Missing: binary-extensions@2.3.0 from lock file
+63.43 npm error Missing: glob-parent@5.1.2 from lock file
+63.43 npm error Missing: picomatch@2.3.2 from lock file
+63.43 npm error
+63.43 npm error Clean install a project
+63.43 npm error
+63.43 npm error Usage:
+63.43 npm error npm ci
+63.43 npm error
+63.43 npm error Options:
+63.43 npm error [--install-strategy <hoisted|nested|shallow|linked>] [--legacy-bundling]
+63.43 npm error [--global-style] [--omit <dev|optional|peer> [--omit <dev|optional|peer> ...]]
+63.43 npm error [--include <prod|dev|optional|peer> [--include <prod|dev|optional|peer> ...]]
+63.43 npm error [--strict-peer-deps] [--foreground-scripts] [--ignore-scripts] [--no-audit]
+63.43 npm error [--no-bin-links] [--no-fund] [--dry-run]
+63.43 npm error [-w|--workspace <workspace-name> [-w|--workspace <workspace-name> ...]]
+63.43 npm error [-ws|--workspaces] [--include-workspace-root] [--install-links]
+63.43 npm error
+63.43 npm error aliases: clean-install, ic, install-clean, isntall-clean
+63.43 npm error
+63.43 npm error Run "npm help ci" for more info
+63.43 npm error A complete log of this run can be found in: /root/.npm/_logs/2026-11-24T07_17_53_996Z-debug-0.log
+68.44 == npm ci attempt 3 ==
+69.32 npm error code EUSAGE
+69.32 npm error
+69.32 npm error `npm ci` can only install packages when your package.json and package-lock.json or npm-shrinkwrap.json are in sync. Please update your lock file with `npm install` before continuing.
+69.32 npm error
+69.32 npm error Invalid: lock file's tailwindcss@4.1.11 does not satisfy tailwindcss@3.4.19
+69.32 npm error Missing: arg@5.0.2 from lock file
+69.32 npm error Missing: chokidar@3.6.0 from lock file
+69.32 npm error Missing: didyoumean@1.2.2 from lock file
+69.32 npm error Missing: dlv@1.1.3 from lock file
+69.32 npm error Missing: fast-glob@3.3.3 from lock file
+69.32 npm error Missing: jiti@1.21.7 from lock file
+69.32 npm error Missing: lilconfig@3.1.5 from lock file
+69.32 npm error Missing: postcss-import@15.1.0 from lock file
+69.32 npm error Missing: postcss-js@4.1.0 from lock file
+69.32 npm error Missing: postcss-load-config@6.0.1 from lock file
+69.32 npm error Missing: postcss-nested@6.2.0 from lock file
+69.32 npm error Missing: postcss-selector-parser@6.1.6 from lock file
+69.32 npm error Missing: resolve@1.22.14 from lock file
+69.32 npm error Missing: sucrase@3.35.1 from lock file
+69.32 npm error Missing: read-cache@1.0.2 from lock file
+69.32 npm error Missing: resolve@1.22.14 from lock file
+69.32 npm error Missing: camelcase-css@2.0.1 from lock file
+69.32 npm error Missing: postcss-selector-parser@6.1.6 from lock file
+69.32 npm error Missing: commander@4.1.1 from lock file
+69.32 npm error Missing: lines-and-columns@1.2.4 from lock file
+69.32 npm error Missing: pirates@4.0.7 from lock file
+69.32 npm error Missing: ts-interface-checker@0.1.13 from lock file
+69.32 npm error Missing: anymatch@3.1.3 from lock file
+69.32 npm error Missing: fsevents@2.3.3 from lock file
+69.32 npm error Missing: glob-parent@5.1.2 from lock file
+69.32 npm error Missing: is-binary-path@2.1.0 from lock file
+69.32 npm error Missing: readdirp@3.6.0 from lock file
+69.32 npm error Missing: picomatch@2.3.2 from lock file
+69.32 npm error Missing: binary-extensions@2.3.0 from lock file
+69.32 npm error Missing: glob-parent@5.1.2 from lock file
+69.32 npm error Missing: picomatch@2.3.2 from lock file
+69.32 npm error
+69.32 npm error Clean install a project
+69.32 npm error
+69.32 npm error Usage:
+69.32 npm error npm ci
+69.32 npm error
+69.32 npm error Options:
+69.32 npm error [--install-strategy <hoisted|nested|shallow|linked>] [--legacy-bundling]
+69.32 npm error [--global-style] [--omit <dev|optional|peer> [--omit <dev|optional|peer> ...]]
+69.32 npm error [--include <prod|dev|optional|peer> [--include <prod|dev|optional|peer> ...]]
+69.32 npm error [--strict-peer-deps] [--foreground-scripts] [--ignore-scripts] [--no-audit]
+69.32 npm error [--no-bin-links] [--no-fund] [--dry-run]
+69.32 npm error [-w|--workspace <workspace-name> [-w|--workspace <workspace-name> ...]]
+69.32 npm error [-ws|--workspaces] [--include-workspace-root] [--install-links]
+69.32 npm error
+69.32 npm error aliases: clean-install, ic, install-clean, isntall-clean
+69.32 npm error
+69.32 npm error Run "npm help ci" for more info
+69.32 npm error A complete log of this run can be found in: /root/.npm/_logs/2026-11-24T07_18_00_102Z-debug-0.log
+74.33 npm ci failed after 3 attempts
+------
+Dockerfile:29
+--------------------
+  28 |     # cache mount 缓存已下载的包，即使失败重试也能续传
+  29 | >>> RUN --mount=type=cache,target=/root/.npm \
+  30 | >>>     ok=0; \
+  31 | >>>     for i in 1 2 3; do \
+  32 | >>>       echo "== npm ci attempt $i =="; \
+  33 | >>>       npm ci --legacy-peer-deps --no-audit --no-fund --maxsockets=3 && ok=1 && break; \
+  34 | >>>       sleep 5; \
+  35 | >>>     done; \
+  36 | >>>     [ "$ok" = "1" ] || (echo "npm ci failed after 3 attempts" && exit 1)
+  37 |
+--------------------
+ERROR: failed to build: failed to solve: process "/bin/sh -c ok=0;     for i in 1 2 3; do       echo \"== npm ci attempt $i ==\";       npm ci --legacy-peer-deps --no-audit --no-fund --maxsockets=3 && ok=1 && break;       sleep 5;     done;     [ \"$ok\" = \"1\" ] || (echo \"npm ci failed after 3 attempts\" && exit 1)" did not complete successfully: exit code: 1
+
+[ERROR] Docker build failed. Deployment aborted.
+Please check network / proxy settings, then run again.
+请按任意键继续. . .
+PS D:\development\claude\personlearning_caozuoti>

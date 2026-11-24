@@ -22,12 +22,21 @@ if errorlevel 1 (
     exit /b 1
 )
 
-:: [1/5] Check lock file (required by npm ci)
+:: [1/5] Ensure lock file exists (auto-generate if missing and npm is available)
 if not exist "package-lock.json" (
-    echo [ERROR] package-lock.json not found.
-    echo Please run: npm install --legacy-peer-deps --package-lock-only
-    pause
-    exit /b 1
+    echo [INFO] package-lock.json not found, generating from package.json ...
+    where npm >nul 2>&1
+    if errorlevel 1 (
+        echo [ERROR] package-lock.json not found and npm is not installed locally.
+        pause
+        exit /b 1
+    )
+    call npm install --legacy-peer-deps --package-lock-only
+    if errorlevel 1 (
+        echo [ERROR] Failed to generate package-lock.json.
+        pause
+        exit /b 1
+    )
 )
 
 echo [1/5] Building Docker image '%IMAGE_NAME%:latest' ...
@@ -87,7 +96,7 @@ if not "%RUNNING%"=="true" (
 docker ps --filter "name=%CONTAINER_NAME%" --format "{{.Names}}  {{.Status}}  {{.Ports}}"
 
 echo [INFO] Checking HTTP response on port %HOST_PORT% ...
-powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri 'http://localhost:%HOST_PORT%' -UseBasicParsing -TimeoutSec 20; Write-Host ('HTTP ' + $r.StatusCode + ' OK') } catch { Write-Host ('HTTP check failed: ' + $_.Exception.Message); exit 1 }"
+powershell -NoProfile -Command "$ok=$false; for($i=1;$i -le 8;$i++){ try { $r = Invoke-WebRequest -Uri 'http://localhost:%HOST_PORT%/api/health' -UseBasicParsing -TimeoutSec 10; if($r.StatusCode -eq 200){ Write-Host ('HTTP ' + $r.StatusCode + ' OK'); $ok=$true; break } } catch { Start-Sleep -Seconds 2 } }; if(-not $ok){ Write-Host 'HTTP health check failed after retries'; exit 1 }"
 if errorlevel 1 (
     echo [WARNING] HTTP check failed. Recent logs:
     docker logs --tail 30 %CONTAINER_NAME%

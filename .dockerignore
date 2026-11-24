@@ -21,6 +21,7 @@ bun.lock
 .env*.local
 data/
 skills/
+public/assets/aistudio/
 metadata.json
 tsconfig.tsbuildinfo
 npm-debug.log*
