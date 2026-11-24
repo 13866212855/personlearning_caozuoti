@@ -206,6 +206,12 @@ function runSchemaAndMigrations(db: Database.Database) {
       is_read INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS system_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   // Non-destructive column additions on existing tables
@@ -457,6 +463,19 @@ function initializeDefaults(db: Database.Database) {
     "UPDATE users SET teacher_id = ?, class_id = ? WHERE role = 'student' AND (teacher_id = '' OR teacher_id IS NULL)"
   ).run(teacherRow.id, defaultClass.id);
 
+  // Seed default registration teacher/class setting if not yet configured
+  const regTeacherSetting = db
+    .prepare("SELECT value FROM system_settings WHERE key = 'default_registration_teacher_id'")
+    .get();
+  if (!regTeacherSetting) {
+    db.prepare(
+      "INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('default_registration_teacher_id', ?, ?)"
+    ).run(teacherRow.id, now);
+    db.prepare(
+      "INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('default_registration_class_id', ?, ?)"
+    ).run(defaultClass.id, now);
+  }
+
   // 3. Seed built-in knowledge points
   const kpCount = db
     .prepare('SELECT COUNT(*) as cnt FROM knowledge_points')
@@ -612,4 +631,186 @@ export function logAdminAction(
     details,
     new Date().toISOString()
   );
+}
+
+export interface DefaultRegistrationTarget {
+  teacherId: string;
+  teacherName: string;
+  teacherUsername: string;
+  classId: string;
+  className: string;
+  grade: string;
+}
+
+export function getDefaultRegistrationTarget(
+  dbArg?: Database.Database
+): DefaultRegistrationTarget | null {
+  const db = dbArg ?? getDb();
+  const teacherSetting = db
+    .prepare(
+      "SELECT value FROM system_settings WHERE key = 'default_registration_teacher_id'"
+    )
+    .get() as { value: string } | undefined;
+  const classSetting = db
+    .prepare(
+      "SELECT value FROM system_settings WHERE key = 'default_registration_class_id'"
+    )
+    .get() as { value: string } | undefined;
+
+  // If explicitly cleared to empty string, do not force assignment
+  if (teacherSetting && teacherSetting.value === '') {
+    return null;
+  }
+
+  let teacher:
+    | { id: string; real_name: string; username: string }
+    | undefined;
+
+  if (teacherSetting?.value) {
+    teacher = db
+      .prepare(
+        "SELECT id, real_name, username FROM users WHERE id = ? AND role = 'teacher' AND is_disabled = 0"
+      )
+      .get(teacherSetting.value) as
+      | { id: string; real_name: string; username: string }
+      | undefined;
+  }
+
+  if (!teacher) {
+    teacher = db
+      .prepare(
+        "SELECT id, real_name, username FROM users WHERE role = 'teacher' AND is_disabled = 0 ORDER BY created_at ASC LIMIT 1"
+      )
+      .get() as
+      | { id: string; real_name: string; username: string }
+      | undefined;
+  }
+
+  if (!teacher) {
+    return null;
+  }
+
+  let cls:
+    | { id: string; name: string; grade: string }
+    | undefined;
+
+  if (classSetting?.value) {
+    cls = db
+      .prepare(
+        'SELECT id, name, grade FROM classes WHERE id = ? AND teacher_id = ?'
+      )
+      .get(classSetting.value, teacher.id) as
+      | { id: string; name: string; grade: string }
+      | undefined;
+  }
+
+  if (!cls) {
+    cls = db
+      .prepare(
+        'SELECT id, name, grade FROM classes WHERE teacher_id = ? ORDER BY created_at ASC LIMIT 1'
+      )
+      .get(teacher.id) as
+      | { id: string; name: string; grade: string }
+      | undefined;
+  }
+
+  return {
+    teacherId: teacher.id,
+    teacherName: teacher.real_name || teacher.username,
+    teacherUsername: teacher.username,
+    classId: cls?.id || '',
+    className: cls?.name || '默认班级',
+    grade: cls?.grade || '高一',
+  };
+}
+
+export function setDefaultRegistrationTarget(
+  dbArg: Database.Database | undefined,
+  teacherId: string,
+  classId?: string
+): DefaultRegistrationTarget | null {
+  const db = dbArg ?? getDb();
+  const now = new Date().toISOString();
+
+  if (!teacherId) {
+    db.transaction(() => {
+      db.prepare(
+        "INSERT INTO system_settings (key, value, updated_at) VALUES ('default_registration_teacher_id', '', ?) ON CONFLICT(key) DO UPDATE SET value = '', updated_at = excluded.updated_at"
+      ).run(now);
+      db.prepare(
+        "INSERT INTO system_settings (key, value, updated_at) VALUES ('default_registration_class_id', '', ?) ON CONFLICT(key) DO UPDATE SET value = '', updated_at = excluded.updated_at"
+      ).run(now);
+    })();
+    return null;
+  }
+
+  const teacher = db
+    .prepare(
+      "SELECT id, real_name, username FROM users WHERE id = ? AND role = 'teacher' AND is_disabled = 0"
+    )
+    .get(teacherId) as
+    | { id: string; real_name: string; username: string }
+    | undefined;
+  if (!teacher) {
+    throw new Error('指定的教师账号不存在或已被禁用');
+  }
+
+  let cls:
+    | { id: string; name: string; grade: string }
+    | undefined;
+
+  if (classId) {
+    cls = db
+      .prepare(
+        'SELECT id, name, grade FROM classes WHERE id = ? AND teacher_id = ?'
+      )
+      .get(classId, teacher.id) as
+      | { id: string; name: string; grade: string }
+      | undefined;
+    if (!cls) {
+      throw new Error('指定的班级不存在或不属于该教师');
+    }
+  } else {
+    cls = db
+      .prepare(
+        'SELECT id, name, grade FROM classes WHERE teacher_id = ? ORDER BY created_at ASC LIMIT 1'
+      )
+      .get(teacher.id) as
+      | { id: string; name: string; grade: string }
+      | undefined;
+  }
+
+  // Ensure teacher has at least one class so newly registered students receive class exams seamlessly
+  if (!cls) {
+    const newClassId = `cls-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    let inviteCode = generateInviteCode();
+    while (
+      db.prepare('SELECT id FROM classes WHERE invite_code = ?').get(inviteCode)
+    ) {
+      inviteCode = generateInviteCode();
+    }
+    db.prepare(
+      `INSERT INTO classes (id, name, grade, teacher_id, invite_code, created_at, updated_at)
+       VALUES (?, '高一(1)班', '高一', ?, ?, ?, ?)`
+    ).run(newClassId, teacher.id, inviteCode, now, now);
+    cls = { id: newClassId, name: '高一(1)班', grade: '高一' };
+  }
+
+  db.transaction(() => {
+    db.prepare(
+      "INSERT INTO system_settings (key, value, updated_at) VALUES ('default_registration_teacher_id', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+    ).run(teacher.id, now);
+    db.prepare(
+      "INSERT INTO system_settings (key, value, updated_at) VALUES ('default_registration_class_id', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+    ).run(cls!.id, now);
+  })();
+
+  return {
+    teacherId: teacher.id,
+    teacherName: teacher.real_name || teacher.username,
+    teacherUsername: teacher.username,
+    classId: cls.id,
+    className: cls.name,
+    grade: cls.grade,
+  };
 }

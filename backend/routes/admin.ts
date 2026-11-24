@@ -1,7 +1,14 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
-import { generateInviteCode, getDb, logAdminAction, rowToQuestion } from '../db';
+import {
+  generateInviteCode,
+  getDb,
+  getDefaultRegistrationTarget,
+  logAdminAction,
+  rowToQuestion,
+  setDefaultRegistrationTarget,
+} from '../db';
 import { gradeAnswerDeterministic } from '../grader';
 import {
   type AuthedRequest,
@@ -1361,26 +1368,92 @@ router.get('/users', (req, res) => {
     Record<string, unknown>
   >;
 
+  const allClasses = db
+    .prepare('SELECT id, name, grade, teacher_id FROM classes ORDER BY created_at ASC')
+    .all() as Array<{ id: string; name: string; grade: string; teacher_id: string }>;
+  const classesByTeacher = new Map<
+    string,
+    Array<{ id: string; name: string; grade: string }>
+  >();
+  for (const c of allClasses) {
+    const list = classesByTeacher.get(c.teacher_id) || [];
+    list.push({ id: c.id, name: c.name, grade: c.grade });
+    classesByTeacher.set(c.teacher_id, list);
+  }
+
+  const defaultRegistration = getDefaultRegistrationTarget(db);
+
   res.json({
-    items: rows.map((r) => ({
-      id: r.id,
-      username: r.username,
-      role: r.role as UserRole,
-      realName: r.real_name,
-      grade: r.grade,
-      className: r.class_name,
-      studentNo: r.student_no,
-      teacherId: r.teacher_id || '',
-      teacherName: r.teacher_name || r.teacher_username || '',
-      classId: r.class_id || '',
-      isDisabled: Boolean(r.is_disabled),
-      mustChangePassword: Boolean(r.must_change_password),
-      createdAt: r.created_at,
-    })),
+    items: rows.map((r) => {
+      const uid = String(r.id);
+      const isDefaultTeacher =
+        r.role === 'teacher' && defaultRegistration?.teacherId === uid;
+      return {
+        id: r.id,
+        username: r.username,
+        role: r.role as UserRole,
+        realName: r.real_name,
+        grade: r.grade,
+        className: r.class_name,
+        studentNo: r.student_no,
+        teacherId: r.teacher_id || '',
+        teacherName: r.teacher_name || r.teacher_username || '',
+        classId: r.class_id || '',
+        isDisabled: Boolean(r.is_disabled),
+        mustChangePassword: Boolean(r.must_change_password),
+        isDefaultRegistrationTeacher: isDefaultTeacher,
+        defaultRegistrationClassId: isDefaultTeacher
+          ? defaultRegistration?.classId || ''
+          : '',
+        defaultRegistrationClassName: isDefaultTeacher
+          ? defaultRegistration?.className || ''
+          : '',
+        teacherClasses:
+          r.role === 'teacher' ? classesByTeacher.get(uid) || [] : [],
+        createdAt: r.created_at,
+      };
+    }),
+    defaultRegistration,
     total,
     page,
     pageSize,
   });
+});
+
+router.put('/settings/default-registration', (req: AuthedRequest, res) => {
+  const schema = z.object({
+    teacherId: z.string().trim(),
+    classId: z.string().trim().optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: '参数格式无效' });
+    return;
+  }
+
+  const db = getDb();
+  try {
+    const target = setDefaultRegistrationTarget(
+      db,
+      parsed.data.teacherId,
+      parsed.data.classId || undefined
+    );
+    logAdminAction(
+      req.admin!.id,
+      req.admin!.username,
+      '设置新注册学生默认归属教师',
+      'system_settings',
+      target?.teacherId || 'none',
+      target
+        ? `${target.teacherName} (${target.teacherUsername}) · ${target.className}`
+        : '已取消默认归属教师'
+    );
+    res.json({ ok: true, defaultRegistration: target });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : '设置默认归属教师失败',
+    });
+  }
 });
 
 router.post('/users/teacher', (req: AuthedRequest, res) => {
@@ -1395,6 +1468,7 @@ router.post('/users/teacher', (req: AuthedRequest, res) => {
     password: z.string().min(6, '初始密码至少 6 位').max(64),
     defaultClassName: z.string().trim().max(40).default('高一(1)班'),
     defaultGrade: z.string().trim().max(20).default('高一'),
+    setAsDefaultRegistration: z.boolean().default(false),
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -1412,6 +1486,7 @@ router.post('/users/teacher', (req: AuthedRequest, res) => {
   }
 
   const teacherId = `tch-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const classId = `cls-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const hash = bcrypt.hashSync(parsed.data.password, 10);
   const now = new Date().toISOString();
 
@@ -1435,7 +1510,7 @@ router.post('/users/teacher', (req: AuthedRequest, res) => {
       `INSERT INTO classes (id, name, grade, teacher_id, invite_code, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).run(
-      `cls-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      classId,
       parsed.data.defaultClassName || '高一(1)班',
       parsed.data.defaultGrade || '高一',
       teacherId,
@@ -1445,16 +1520,20 @@ router.post('/users/teacher', (req: AuthedRequest, res) => {
     );
   })();
 
+  if (parsed.data.setAsDefaultRegistration) {
+    setDefaultRegistrationTarget(db, teacherId, classId);
+  }
+
   logAdminAction(
     req.admin!.id,
     req.admin!.username,
     '创建教师账号',
     'user',
     teacherId,
-    `${parsed.data.realName} (${parsed.data.username})`
+    `${parsed.data.realName} (${parsed.data.username})${parsed.data.setAsDefaultRegistration ? ' [设为默认新生归属]' : ''}`
   );
 
-  res.status(201).json({ id: teacherId, inviteCode });
+  res.status(201).json({ id: teacherId, classId, inviteCode });
 });
 
 router.patch('/users/:id/role', (req: AuthedRequest, res) => {

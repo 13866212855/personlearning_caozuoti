@@ -2,15 +2,13 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Check,
-  Copy,
   KeyRound,
   Loader2,
   Plus,
-  RefreshCw,
   Search,
   Trash2,
   Upload,
+  UserCheck,
   UserPlus,
   X,
 } from 'lucide-react';
@@ -28,16 +26,27 @@ interface ClassStudent {
   createdAt: string;
 }
 
+interface DefaultRegState {
+  isDefaultTeacher: boolean;
+  defaultClassId: string;
+  defaultClassName: string;
+}
+
 export default function TeacherClassesTab() {
   const [classes, setClasses] = useState<ClassItem[]>([]);
+  const [defaultReg, setDefaultReg] = useState<DefaultRegState>({
+    isDefaultTeacher: false,
+    defaultClassId: '',
+    defaultClassName: '',
+  });
   const [selectedClassId, setSelectedClassId] = useState('');
   const [students, setStudents] = useState<ClassStudent[]>([]);
   const [studentTotal, setStudentTotal] = useState(0);
   const [keyword, setKeyword] = useState('');
   const [loading, setLoading] = useState(true);
+  const [savingDefault, setSavingDefault] = useState(false);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
-  const [copiedCode, setCopiedCode] = useState('');
 
   // Create/Edit Class Modal
   const [classModal, setClassModal] = useState<{
@@ -67,8 +76,14 @@ export default function TeacherClassesTab() {
   const [newPwd, setNewPwd] = useState('');
 
   const loadClasses = useCallback(async () => {
-    const res = await portalFetch<{ items: ClassItem[] }>('/api/teacher/classes');
+    const res = await portalFetch<{
+      items: ClassItem[];
+      defaultRegistration?: DefaultRegState;
+    }>('/api/teacher/classes');
     setClasses(res.items);
+    if (res.defaultRegistration) {
+      setDefaultReg(res.defaultRegistration);
+    }
     if (res.items.length > 0 && !selectedClassId) {
       setSelectedClassId(res.items[0].id);
     }
@@ -95,10 +110,16 @@ export default function TeacherClassesTab() {
 
   useEffect(() => {
     let active = true;
-    portalFetch<{ items: ClassItem[] }>('/api/teacher/classes')
+    portalFetch<{
+      items: ClassItem[];
+      defaultRegistration?: DefaultRegState;
+    }>('/api/teacher/classes')
       .then(async (res) => {
         if (!active) return;
         setClasses(res.items);
+        if (res.defaultRegistration) {
+          setDefaultReg(res.defaultRegistration);
+        }
         if (res.items.length > 0) {
           const firstId = res.items[0].id;
           setSelectedClassId(firstId);
@@ -133,6 +154,37 @@ export default function TeacherClassesTab() {
     }
   };
 
+  const handleSetDefaultClass = async (clsId: string, enabled = true) => {
+    setSavingDefault(true);
+    setErr('');
+    setMsg('');
+    try {
+      const res = await portalFetch<{
+        isDefaultTeacher: boolean;
+        defaultClassId: string;
+        defaultClassName: string;
+      }>('/api/teacher/settings/default-registration', {
+        method: 'PUT',
+        body: JSON.stringify({ enabled, classId: clsId }),
+      });
+      setDefaultReg({
+        isDefaultTeacher: res.isDefaultTeacher,
+        defaultClassId: res.defaultClassId,
+        defaultClassName: res.defaultClassName,
+      });
+      setMsg(
+        enabled
+          ? `已将「${res.defaultClassName}」设为新注册学生的默认接收班级`
+          : '已取消默认接收新注册学生设置'
+      );
+      await loadClasses();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '设置默认接收班级失败');
+    } finally {
+      setSavingDefault(false);
+    }
+  };
+
   const handleSaveClass = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!classModal) return;
@@ -149,9 +201,7 @@ export default function TeacherClassesTab() {
             }),
           }
         );
-        setMsg(
-          `已创建班级「${res.item.name}」，邀请码：${res.item.inviteCode}`
-        );
+        setMsg(`已创建班级「${res.item.name}」`);
         await loadClasses();
         setSelectedClassId(res.item.id);
         await loadStudents(res.item.id);
@@ -171,25 +221,6 @@ export default function TeacherClassesTab() {
     } catch (e) {
       setErr(e instanceof Error ? e.message : '保存班级失败');
     }
-  };
-
-  const handleResetInvite = async (clsId: string) => {
-    try {
-      const res = await portalFetch<{ inviteCode: string }>(
-        `/api/teacher/classes/${clsId}/reset-invite`,
-        { method: 'POST' }
-      );
-      setMsg(`班级邀请码已更新为：${res.inviteCode}`);
-      await loadClasses();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '重置邀请码失败');
-    }
-  };
-
-  const handleCopyInvite = (code: string) => {
-    void navigator.clipboard?.writeText(code);
-    setCopiedCode(code);
-    setTimeout(() => setCopiedCode(''), 1800);
   };
 
   const handleAddStudent = async (e: React.FormEvent) => {
@@ -230,7 +261,9 @@ export default function TeacherClassesTab() {
       setCsvModalOpen(false);
       setMsg(
         `批量导入完成：成功创建 ${res.createdCount} 名学生${
-          res.skipped.length > 0 ? `，跳过 ${res.skipped.length} 条（${res.skipped.slice(0, 3).join('；')}）` : ''
+          res.skipped.length > 0
+            ? `，跳过 ${res.skipped.length} 条（${res.skipped.slice(0, 3).join('；')}）`
+            : ''
         }`
       );
       await loadClasses();
@@ -292,7 +325,7 @@ export default function TeacherClassesTab() {
         <div>
           <h2 className="text-lg font-bold text-slate-900">班级与学生管理</h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            创建班级并生成邀请码供学生注册加入，支持单个添加与 CSV 批量导入学生账号
+            管理名下班级与学生名单，支持设置「新学生注册默认接收班级」、单个添加与 CSV 批量导入
           </p>
         </div>
 
@@ -306,6 +339,45 @@ export default function TeacherClassesTab() {
           <Plus className="w-3.5 h-3.5" />
           <span>新建班级</span>
         </button>
+      </div>
+
+      {/* Default Registration Routing Status Banner */}
+      <div
+        className={`rounded-xl border px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs ${
+          defaultReg.isDefaultTeacher
+            ? 'bg-teal-50/70 border-teal-200 text-teal-900'
+            : 'bg-white border-slate-200 text-slate-700'
+        }`}
+      >
+        <div className="flex items-center gap-2">
+          <UserCheck
+            className={`w-4 h-4 shrink-0 ${
+              defaultReg.isDefaultTeacher ? 'text-teal-600' : 'text-slate-400'
+            }`}
+          />
+          {defaultReg.isDefaultTeacher ? (
+            <span>
+              <span className="font-semibold">新学生注册默认归属已开启：</span>
+              新自助注册的学生无需填写邀请码，将自动归属到您的「
+              <span className="font-semibold">{defaultReg.defaultClassName}</span>
+              」。
+            </span>
+          ) : (
+            <span>
+              新自助注册的学生当前未默认归属到您名下；点击下方任意班级的「设为默认新生班级」即可自动接收新注册学生。
+            </span>
+          )}
+        </div>
+        {defaultReg.isDefaultTeacher && (
+          <button
+            type="button"
+            disabled={savingDefault}
+            onClick={() => void handleSetDefaultClass('', false)}
+            className="text-xs text-slate-600 hover:text-slate-900 underline self-start sm:self-center shrink-0"
+          >
+            取消默认归属
+          </button>
+        )}
       </div>
 
       {msg && (
@@ -360,40 +432,28 @@ export default function TeacherClassesTab() {
               </div>
 
               <div className="pt-2 border-t border-slate-200/70 flex items-center justify-between text-xs">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-slate-500">邀请码：</span>
-                  <span className="font-mono font-bold text-slate-900">
-                    {cls.inviteCode}
+                {cls.isDefaultRegistration ? (
+                  <span className="inline-flex items-center gap-1 font-semibold text-teal-700">
+                    <UserCheck className="w-3.5 h-3.5" />
+                    <span>默认接收新注册学生</span>
                   </span>
-                </div>
-                <div className="flex items-center gap-2">
+                ) : (
+                  <span className="text-slate-400">普通班级</span>
+                )}
+
+                {!cls.isDefaultRegistration && (
                   <button
                     type="button"
+                    disabled={savingDefault}
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleCopyInvite(cls.inviteCode);
+                      void handleSetDefaultClass(cls.id, true);
                     }}
-                    className="text-sky-700 hover:underline inline-flex items-center gap-0.5"
+                    className="text-sky-700 hover:underline font-medium"
                   >
-                    {copiedCode === cls.inviteCode ? (
-                      <Check className="w-3 h-3 text-teal-600" />
-                    ) : (
-                      <Copy className="w-3 h-3" />
-                    )}
-                    <span>{copiedCode === cls.inviteCode ? '已复制' : '复制'}</span>
+                    设为默认新生班级
                   </button>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void handleResetInvite(cls.id);
-                    }}
-                    className="text-slate-600 hover:text-slate-900 inline-flex items-center gap-0.5"
-                  >
-                    <RefreshCw className="w-3 h-3" />
-                    <span>重置</span>
-                  </button>
-                </div>
+                )}
               </div>
             </div>
           );
@@ -452,8 +512,7 @@ export default function TeacherClassesTab() {
 
           {students.length === 0 ? (
             <div className="py-10 text-center text-xs text-slate-500">
-              当前班级暂无学生，可将邀请码「{activeClass.inviteCode}
-              」发给学生注册，或点击上方按钮直接添加/导入。
+              当前班级暂无学生，可点击上方按钮直接添加或导入，或将该班级设为「默认新生班级」以自动接收学生自助注册。
             </div>
           ) : (
             <div className="overflow-x-auto">

@@ -815,14 +815,6 @@ function ProfileContent() {
                       '待分配'}
                   </dd>
                 </div>
-                {stats?.classInfo?.inviteCode && (
-                  <div className="py-3 flex justify-between">
-                    <dt className="text-slate-500">班级邀请码</dt>
-                    <dd className="font-mono text-slate-700">
-                      {stats.classInfo.inviteCode}
-                    </dd>
-                  </div>
-                )}
               </dl>
             </div>
 

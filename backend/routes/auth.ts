@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
-import { getDb } from '../db';
+import { getDb, getDefaultRegistrationTarget } from '../db';
 import {
   type AuthedRequest,
-  inviteLookupRateLimiter,
   loginRateLimiter,
+  registerRateLimiter,
   requirePortalAuth,
   signPortalToken,
 } from '../middleware/auth';
@@ -21,48 +21,29 @@ const RegisterSchema = z
       .max(32, '用户名最多 32 个字符')
       .regex(/^[a-zA-Z0-9_]+$/, '用户名仅支持字母、数字和下划线'),
     password: z.string().min(6, '密码至少 6 位').max(64, '密码最多 64 位'),
-    confirmPassword: z.string(),
+    confirmPassword: z.string().optional(),
     realName: z.string().trim().min(1, '请输入真实姓名').max(32),
-    grade: z.string().trim().min(1, '请选择年级').max(20),
-    className: z.string().trim().min(1, '请输入班级').max(30),
-    inviteCode: z.string().trim().min(4, '请输入教师提供的班级邀请码').max(20),
+    grade: z.string().trim().max(20).optional(),
+    className: z.string().trim().max(30).optional(),
   })
-  .refine((d) => d.password === d.confirmPassword, {
-    message: '两次输入的密码不一致',
-    path: ['confirmPassword'],
-  });
+  .refine(
+    (d) =>
+      d.confirmPassword === undefined ||
+      d.confirmPassword === '' ||
+      d.password === d.confirmPassword,
+    {
+      message: '两次输入的密码不一致',
+      path: ['confirmPassword'],
+    }
+  );
 
 const LoginSchema = z.object({
   username: z.string().trim().min(1, '请输入用户名'),
   password: z.string().min(1, '请输入密码'),
 });
 
-// Public, rate-limited class lookup for the registration page. The invite
-// code alone identifies the class, so the page shows its authoritative
-// name/grade instead of asking students to type (and possibly mistype) them.
-router.get('/invite-lookup', inviteLookupRateLimiter, (req, res) => {
-  const code = String(req.query.code ?? '').trim();
-  if (code.length < 4 || code.length > 20) {
-    res.status(400).json({ error: '请输入教师提供的班级邀请码' });
-    return;
-  }
-
-  const db = getDb();
-  const cls = db
-    .prepare(
-      'SELECT name, grade FROM classes WHERE UPPER(invite_code) = UPPER(?)'
-    )
-    .get(code) as { name: string; grade: string } | undefined;
-  if (!cls) {
-    res.status(404).json({ error: '邀请码无效，请向任课教师确认' });
-    return;
-  }
-
-  res.json({ name: cls.name, grade: cls.grade });
-});
-
-// Student self-registration ONLY (requires valid teacher class invite code)
-router.post('/register', (req, res) => {
+// Student self-registration ONLY (automatically binds to configured default teacher & class)
+router.post('/register', registerRateLimiter, (req, res) => {
   const parsed = RegisterSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({
@@ -71,8 +52,7 @@ router.post('/register', (req, res) => {
     return;
   }
 
-  const { username, password, realName, grade, className, inviteCode } =
-    parsed.data;
+  const { username, password, realName, grade, className } = parsed.data;
   const db = getDb();
 
   const existing = db
@@ -83,17 +63,12 @@ router.post('/register', (req, res) => {
     return;
   }
 
-  const cls = db
-    .prepare(
-      'SELECT id, name, grade, teacher_id FROM classes WHERE UPPER(invite_code) = UPPER(?)'
-    )
-    .get(inviteCode) as
-    | { id: string; name: string; grade: string; teacher_id: string }
-    | undefined;
-  if (!cls) {
-    res.status(400).json({ error: '班级邀请码无效，请向任课教师确认' });
-    return;
-  }
+  const defaultTarget = getDefaultRegistrationTarget(db);
+  const assignedTeacherId = defaultTarget?.teacherId || '';
+  const assignedClassId = defaultTarget?.classId || '';
+  const assignedGrade = (grade || '').trim() || defaultTarget?.grade || '高一';
+  const assignedClassName =
+    (className || '').trim() || defaultTarget?.className || '待分班';
 
   const id = `stu-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const passwordHash = bcrypt.hashSync(password, 10);
@@ -110,10 +85,10 @@ router.post('/register', (req, res) => {
     username,
     passwordHash,
     realName,
-    grade || cls.grade,
-    className || cls.name,
-    cls.teacher_id,
-    cls.id,
+    assignedGrade,
+    assignedClassName,
+    assignedTeacherId,
+    assignedClassId,
     now,
     now
   );
@@ -131,10 +106,10 @@ router.post('/register', (req, res) => {
       username,
       role: 'student',
       realName,
-      grade: grade || cls.grade,
-      className: className || cls.name,
-      teacherId: cls.teacher_id,
-      classId: cls.id,
+      grade: assignedGrade,
+      className: assignedClassName,
+      teacherId: assignedTeacherId,
+      classId: assignedClassId,
       mustChangePassword: false,
     },
   });

@@ -9,11 +9,18 @@ import {
   Loader2,
   Search,
   Shield,
+  UserCheck,
   UserPlus,
   X,
 } from 'lucide-react';
 import { adminFetch } from '@/lib/api';
 import type { UserRole } from '@/lib/types';
+
+interface TeacherClassBrief {
+  id: string;
+  name: string;
+  grade: string;
+}
 
 interface AdminUserRow {
   id: string;
@@ -28,6 +35,10 @@ interface AdminUserRow {
   classId: string;
   isDisabled: boolean;
   mustChangePassword: boolean;
+  isDefaultRegistrationTeacher?: boolean;
+  defaultRegistrationClassId?: string;
+  defaultRegistrationClassName?: string;
+  teacherClasses?: TeacherClassBrief[];
   createdAt: string;
 }
 
@@ -40,6 +51,15 @@ interface AdminClassRow {
   inviteCode: string;
 }
 
+interface DefaultRegistrationInfo {
+  teacherId: string;
+  teacherName: string;
+  teacherUsername: string;
+  classId: string;
+  className: string;
+  grade: string;
+}
+
 const ROLE_LABELS: Record<UserRole, string> = {
   super_admin: '超级管理员',
   teacher: '教师',
@@ -48,6 +68,9 @@ const ROLE_LABELS: Record<UserRole, string> = {
 
 export default function AdminUsersTab() {
   const [items, setItems] = useState<AdminUserRow[]>([]);
+  const [defaultReg, setDefaultReg] = useState<DefaultRegistrationInfo | null>(
+    null
+  );
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [roleFilter, setRoleFilter] = useState('');
@@ -64,8 +87,15 @@ export default function AdminUsersTab() {
     password: '',
     defaultGrade: '高一',
     defaultClassName: '高一(1)班',
+    setAsDefaultRegistration: false,
   });
   const [creating, setCreating] = useState(false);
+
+  // Set Default Registration Teacher Modal
+  const [defaultTargetTeacher, setDefaultTargetTeacher] =
+    useState<AdminUserRow | null>(null);
+  const [defaultTargetClassId, setDefaultTargetClassId] = useState('');
+  const [savingDefault, setSavingDefault] = useState(false);
 
   // Reset Password Modal
   const [resetTarget, setResetTarget] = useState<AdminUserRow | null>(null);
@@ -93,10 +123,12 @@ export default function AdminUsersTab() {
         if (keyword.trim()) qs.set('keyword', keyword.trim());
         const res = await adminFetch<{
           items: AdminUserRow[];
+          defaultRegistration: DefaultRegistrationInfo | null;
           total: number;
           page: number;
         }>(`/api/admin/users?${qs.toString()}`);
         setItems(res.items);
+        setDefaultReg(res.defaultRegistration ?? null);
         setTotal(res.total);
         setPage(res.page);
       } catch (e) {
@@ -112,12 +144,16 @@ export default function AdminUsersTab() {
     let active = true;
     const qs = new URLSearchParams({ page: '1', pageSize: '15' });
     if (roleFilter) qs.set('role', roleFilter);
-    adminFetch<{ items: AdminUserRow[]; total: number; page: number }>(
-      `/api/admin/users?${qs.toString()}`
-    )
+    adminFetch<{
+      items: AdminUserRow[];
+      defaultRegistration: DefaultRegistrationInfo | null;
+      total: number;
+      page: number;
+    }>(`/api/admin/users?${qs.toString()}`)
       .then((res) => {
         if (!active) return;
         setItems(res.items);
+        setDefaultReg(res.defaultRegistration ?? null);
         setTotal(res.total);
         setPage(res.page);
       })
@@ -139,7 +175,7 @@ export default function AdminUsersTab() {
     setCreating(true);
     setErr('');
     try {
-      const res = await adminFetch<{ id: string; inviteCode: string }>(
+      await adminFetch<{ id: string; classId: string }>(
         '/api/admin/users/teacher',
         {
           method: 'POST',
@@ -147,21 +183,63 @@ export default function AdminUsersTab() {
         }
       );
       setCreateOpen(false);
+      const classLabel = tForm.defaultClassName || '高一(1)班';
+      const wasDefault = tForm.setAsDefaultRegistration;
       setTForm({
         username: '',
         realName: '',
         password: '',
         defaultGrade: '高一',
         defaultClassName: '高一(1)班',
+        setAsDefaultRegistration: false,
       });
       setMsg(
-        `教师账号创建成功，并已为其初始化默认班级（邀请码：${res.inviteCode}）`
+        `教师账号创建成功，并已为其初始化默认班级「${classLabel}」${
+          wasDefault ? '，同时设为新注册学生默认归属教师' : ''
+        }`
       );
       void load(1);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '创建教师账号失败');
     } finally {
       setCreating(false);
+    }
+  };
+
+  const openDefaultTeacherModal = (u: AdminUserRow) => {
+    setDefaultTargetTeacher(u);
+    setDefaultTargetClassId(
+      u.defaultRegistrationClassId || u.teacherClasses?.[0]?.id || ''
+    );
+  };
+
+  const handleSaveDefaultTeacher = async () => {
+    if (!defaultTargetTeacher) return;
+    setSavingDefault(true);
+    setErr('');
+    try {
+      const res = await adminFetch<{
+        ok: boolean;
+        defaultRegistration: DefaultRegistrationInfo | null;
+      }>('/api/admin/settings/default-registration', {
+        method: 'PUT',
+        body: JSON.stringify({
+          teacherId: defaultTargetTeacher.id,
+          classId: defaultTargetClassId || undefined,
+        }),
+      });
+      setDefaultReg(res.defaultRegistration);
+      setMsg(
+        `已设置新注册学生默认归属教师为「${defaultTargetTeacher.realName}（${
+          res.defaultRegistration?.className || '默认班级'
+        }）」`
+      );
+      setDefaultTargetTeacher(null);
+      void load(page);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '设置默认归属教师失败');
+    } finally {
+      setSavingDefault(false);
     }
   };
 
@@ -254,7 +332,7 @@ export default function AdminUsersTab() {
         <div>
           <h2 className="text-lg font-bold text-slate-900">用户与角色管理</h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            管理全站超级管理员、教师与学生账号；教师账号仅支持由超级管理员在此创建
+            管理全站超级管理员、教师与学生账号；可指定任意教师默认接收新自助注册的学生
           </p>
         </div>
         <button
@@ -265,6 +343,29 @@ export default function AdminUsersTab() {
           <UserPlus className="w-3.5 h-3.5" />
           <span>创建教师账号</span>
         </button>
+      </div>
+
+      {/* Default Student Registration Teacher Banner */}
+      <div className="p-3.5 rounded-xl bg-teal-50/70 border border-teal-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-teal-900">
+        <div className="flex items-center gap-2">
+          <UserCheck className="w-4 h-4 text-teal-600 shrink-0" />
+          {defaultReg ? (
+            <span>
+              <span className="font-semibold">新注册学生默认归属：</span>
+              <span className="font-bold">{defaultReg.teacherName}</span>（
+              {defaultReg.teacherUsername}）· {defaultReg.grade}{' '}
+              {defaultReg.className}
+            </span>
+          ) : (
+            <span>
+              <span className="font-semibold">新注册学生默认归属：</span>
+              暂未指定默认教师（可在下方教师行点击「设为默认归属」进行指定）
+            </span>
+          )}
+        </div>
+        <span className="text-[11px] text-teal-700">
+          学生注册无需输入邀请码，注册后自动加入该教师对应班级
+        </span>
       </div>
 
       {msg && (
@@ -364,6 +465,27 @@ export default function AdminUsersTab() {
                             </span>
                           )}
                         </div>
+                      ) : u.role === 'teacher' ? (
+                        <div className="space-y-1">
+                          <div>
+                            {u.teacherClasses && u.teacherClasses.length > 0
+                              ? `${u.teacherClasses.length} 个班级（${u.teacherClasses
+                                  .slice(0, 2)
+                                  .map((c) => c.name)
+                                  .join('、')}${
+                                  u.teacherClasses.length > 2 ? '…' : ''
+                                }）`
+                              : '暂无班级'}
+                          </div>
+                          {u.isDefaultRegistrationTeacher && (
+                            <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-teal-50 border border-teal-200 text-[11px] font-semibold text-teal-700">
+                              <UserCheck className="w-3 h-3" />
+                              <span>
+                                默认接收新生（{u.defaultRegistrationClassName}）
+                              </span>
+                            </div>
+                          )}
+                        </div>
                       ) : (
                         <span className="text-slate-400">-</span>
                       )}
@@ -383,6 +505,20 @@ export default function AdminUsersTab() {
                       {new Date(u.createdAt).toLocaleDateString('zh-CN')}
                     </td>
                     <td className="py-3 px-4 text-right space-x-2.5 whitespace-nowrap">
+                      {u.role === 'teacher' && !u.isDisabled && (
+                        <button
+                          type="button"
+                          onClick={() => openDefaultTeacherModal(u)}
+                          className="text-teal-700 hover:underline inline-flex items-center gap-0.5 font-medium"
+                        >
+                          <UserCheck className="w-3 h-3" />
+                          <span>
+                            {u.isDefaultRegistrationTeacher
+                              ? '调整默认班级'
+                              : '设为默认归属'}
+                          </span>
+                        </button>
+                      )}
                       {u.role === 'student' && (
                         <button
                           type="button"
@@ -541,6 +677,23 @@ export default function AdminUsersTab() {
               </label>
             </div>
 
+            <label className="flex items-center gap-2 pt-1 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={tForm.setAsDefaultRegistration}
+                onChange={(e) =>
+                  setTForm({
+                    ...tForm,
+                    setAsDefaultRegistration: e.target.checked,
+                  })
+                }
+                className="rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+              />
+              <span className="text-slate-700 font-medium">
+                同时设为新注册学生的默认归属教师
+              </span>
+            </label>
+
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
@@ -558,6 +711,57 @@ export default function AdminUsersTab() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Set Default Registration Teacher Modal */}
+      {defaultTargetTeacher && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl border border-slate-200 p-5 w-full max-w-sm space-y-4 text-xs">
+            <h3 className="text-base font-bold text-slate-900">
+              设置新学生默认归属教师
+            </h3>
+            <p className="text-slate-600 leading-relaxed">
+              新自助注册的学生将自动归属至教师{' '}
+              <span className="font-semibold text-slate-900">
+                {defaultTargetTeacher.realName}（{defaultTargetTeacher.username}）
+              </span>
+              ，请选择默认接收新生的班级：
+            </p>
+            <select
+              value={defaultTargetClassId}
+              onChange={(e) => setDefaultTargetClassId(e.target.value)}
+              className="w-full h-9 px-3 border border-slate-300 rounded-lg bg-white text-sm"
+            >
+              {defaultTargetTeacher.teacherClasses &&
+              defaultTargetTeacher.teacherClasses.length > 0 ? (
+                defaultTargetTeacher.teacherClasses.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.grade} · {c.name}
+                  </option>
+                ))
+              ) : (
+                <option value="">自动创建默认班级「高一(1)班」</option>
+              )}
+            </select>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDefaultTargetTeacher(null)}
+                className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={savingDefault}
+                onClick={() => void handleSaveDefaultTeacher()}
+                className="px-4 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white rounded-lg font-medium"
+              >
+                {savingDefault ? '保存中...' : '确认设为默认归属'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

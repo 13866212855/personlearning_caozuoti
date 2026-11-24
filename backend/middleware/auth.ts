@@ -84,15 +84,14 @@ export const loginRateLimiter = rateLimit({
   message: { error: '登录尝试过于频繁，请 10 分钟后再试' },
 });
 
-// Public invite-code lookup used by the registration page. Looser than login
-// (students just typing/retyping a code) but still abuse-resistant.
-export const inviteLookupRateLimiter = rateLimit({
+// Student self-registration rate limiter to prevent automated account spam.
+export const registerRateLimiter = rateLimit({
   windowMs: 10 * 60 * 1000, // 10 minutes
-  max: 60,
+  max: 30,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => extractClientIp(req),
-  message: { error: '查询过于频繁，请 10 分钟后再试' },
+  message: { error: '注册操作过于频繁，请 10 分钟后再试' },
 });
 
 export function signPortalToken(payload: PortalJwtPayload): string {

@@ -254,8 +254,9 @@ export interface ClassItem {
   id: string;
   name: string;
   grade: string;
-  inviteCode: string;
+  inviteCode?: string;
   studentCount: number;
+  isDefaultRegistration?: boolean;
   createdAt: string;
 }
 

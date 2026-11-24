@@ -1,7 +1,13 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
-import { generateInviteCode, getDb, rowToQuestion } from '../db';
+import {
+  generateInviteCode,
+  getDb,
+  getDefaultRegistrationTarget,
+  rowToQuestion,
+  setDefaultRegistrationTarget,
+} from '../db';
 import { gradeAnswerDeterministic } from '../grader';
 import { type AuthedRequest, requireTeacherAuth } from '../middleware/auth';
 import {
@@ -174,6 +180,9 @@ router.get('/classes', (req: AuthedRequest, res) => {
     )
     .all(teacherId) as Array<Record<string, unknown>>;
 
+  const defaultTarget = getDefaultRegistrationTarget(db);
+  const isDefaultTeacher = defaultTarget?.teacherId === teacherId;
+
   res.json({
     items: rows.map((r) => ({
       id: r.id,
@@ -181,9 +190,83 @@ router.get('/classes', (req: AuthedRequest, res) => {
       grade: r.grade,
       inviteCode: r.invite_code,
       studentCount: Number(r.student_count || 0),
+      isDefaultRegistration:
+        isDefaultTeacher && defaultTarget?.classId === String(r.id),
       createdAt: r.created_at,
     })),
+    defaultRegistration: {
+      isDefaultTeacher,
+      defaultClassId: isDefaultTeacher ? defaultTarget?.classId || '' : '',
+      defaultClassName: isDefaultTeacher ? defaultTarget?.className || '' : '',
+    },
   });
+});
+
+router.get('/settings/default-registration', (req: AuthedRequest, res) => {
+  const db = getDb();
+  const teacherId = req.teacher!.id;
+  const classes = db
+    .prepare(
+      'SELECT id, name, grade FROM classes WHERE teacher_id = ? ORDER BY created_at DESC'
+    )
+    .all(teacherId) as Array<{ id: string; name: string; grade: string }>;
+
+  const defaultTarget = getDefaultRegistrationTarget(db);
+  const isDefaultTeacher = defaultTarget?.teacherId === teacherId;
+
+  res.json({
+    isDefaultTeacher,
+    defaultClassId: isDefaultTeacher ? defaultTarget?.classId || '' : '',
+    defaultClassName: isDefaultTeacher ? defaultTarget?.className || '' : '',
+    classes,
+  });
+});
+
+router.put('/settings/default-registration', (req: AuthedRequest, res) => {
+  const schema = z.object({
+    enabled: z.boolean().default(true),
+    classId: z.string().trim().optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: '参数格式不正确' });
+    return;
+  }
+
+  const db = getDb();
+  const teacherId = req.teacher!.id;
+
+  try {
+    if (!parsed.data.enabled) {
+      const current = getDefaultRegistrationTarget(db);
+      if (current?.teacherId === teacherId) {
+        setDefaultRegistrationTarget(db, '');
+      }
+      res.json({
+        ok: true,
+        isDefaultTeacher: false,
+        defaultClassId: '',
+        defaultClassName: '',
+      });
+      return;
+    }
+
+    const updated = setDefaultRegistrationTarget(
+      db,
+      teacherId,
+      parsed.data.classId || undefined
+    );
+    res.json({
+      ok: true,
+      isDefaultTeacher: true,
+      defaultClassId: updated?.classId || '',
+      defaultClassName: updated?.className || '',
+    });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : '设置失败',
+    });
+  }
 });
 
 router.post('/classes', (req: AuthedRequest, res) => {
