@@ -94,7 +94,7 @@ export default function TeacherOverviewTab({
             className="h-9 px-4 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"
           >
             <BookPlus className="w-3.5 h-3.5 text-sky-600" />
-            <span>新建出题</span>
+            <span>出题 / 分配试题</span>
           </button>
           <button
             type="button"
@@ -106,6 +106,24 @@ export default function TeacherOverviewTab({
           </button>
         </div>
       </div>
+
+      {data.totalExamCount === 0 && (
+        <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-900">
+          <div>
+            <div className="font-bold">提示：您当前尚未向名下班级分配或发布任何试题</div>
+            <p className="text-amber-800 mt-0.5">
+              归属于您名下班级的学生登录后，只会看到您已发布并分配给对应班级的试题或考试。您可以直接前往题库勾选试题分配给学生。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigateTab('studio')}
+            className="h-8 px-3.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-medium whitespace-nowrap self-start sm:self-center"
+          >
+            去题库分配试题
+          </button>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

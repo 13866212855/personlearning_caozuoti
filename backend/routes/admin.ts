@@ -1456,7 +1456,134 @@ router.put('/settings/default-registration', (req: AuthedRequest, res) => {
   }
 });
 
-router.post('/users/teacher', (req: AuthedRequest, res) => {
+function createTeacherAssignedExam(
+  db: ReturnType<typeof getDb>,
+  params: {
+    teacherId: string;
+    teacherName: string;
+    classIds: string[];
+    questionIds: string[];
+    title?: string;
+    duration?: number;
+    maxAttempts?: number;
+  }
+): { examId: string; title: string; questionCount: number } | null {
+  const uniqueQuestionIds = Array.from(new Set(params.questionIds));
+  const uniqueClassIds = Array.from(new Set(params.classIds));
+  if (uniqueQuestionIds.length === 0 || uniqueClassIds.length === 0) {
+    return null;
+  }
+
+  const qPlaceholders = uniqueQuestionIds.map(() => '?').join(', ');
+  const qRows = db
+    .prepare(
+      `SELECT id, title, total_score
+       FROM questions
+       WHERE status = 'published' AND id IN (${qPlaceholders})`
+    )
+    .all(...uniqueQuestionIds) as Array<{
+    id: string;
+    title: string;
+    total_score: number;
+  }>;
+
+  const qMap = new Map(qRows.map((q) => [q.id, q]));
+  const orderedQuestions = uniqueQuestionIds
+    .map((id) => qMap.get(id))
+    .filter((q): q is { id: string; title: string; total_score: number } =>
+      Boolean(q)
+    );
+  if (orderedQuestions.length === 0) {
+    return null;
+  }
+
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
+  const endTime = new Date(
+    nowDate.getTime() + 180 * 24 * 60 * 60 * 1000
+  ).toISOString();
+  const examId = `exam-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const examTitle =
+    params.title && params.title.trim().length >= 2
+      ? params.title.trim()
+      : orderedQuestions.length === 1
+        ? `操作练习：${orderedQuestions[0].title}`.slice(0, 78)
+        : `会考操作题专项练习（共 ${orderedQuestions.length} 题）`;
+
+  db.prepare(
+    `INSERT INTO exams (
+      id, title, description, teacher_id, duration, start_time, end_time,
+      max_attempts, score_policy, show_score_immediately, show_answer_policy,
+      shuffle, anti_cheat_switch, allow_late, status, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'highest', 1, 'immediate', 0, 0, 1, 'published', ?, ?)`
+  ).run(
+    examId,
+    examTitle,
+    '管理员或教师分配的操作题练习任务，可反复练习并即时查看判分与解析。',
+    params.teacherId,
+    params.duration || 45,
+    now,
+    endTime,
+    params.maxAttempts || 5,
+    now,
+    now
+  );
+
+  const insQ = db.prepare(
+    'INSERT INTO exam_questions (id, exam_id, question_id, sort_order, score) VALUES (?, ?, ?, ?, ?)'
+  );
+  orderedQuestions.forEach((q, idx) => {
+    insQ.run(
+      `eq-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
+      examId,
+      q.id,
+      idx + 1,
+      Number(q.total_score || 100)
+    );
+  });
+
+  const insA = db.prepare(
+    'INSERT INTO exam_assignments (id, exam_id, target_type, target_id) VALUES (?, ?, ?, ?)'
+  );
+  uniqueClassIds.forEach((cid, idx) => {
+    insA.run(
+      `ea-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
+      examId,
+      'class',
+      cid
+    );
+  });
+
+  const cPlaceholders = uniqueClassIds.map(() => '?').join(', ');
+  const existingStudents = db
+    .prepare(
+      `SELECT id FROM users WHERE role = 'student' AND class_id IN (${cPlaceholders})`
+    )
+    .all(...uniqueClassIds) as Array<{ id: string }>;
+
+  const insNotif = db.prepare(
+    `INSERT INTO notifications (id, user_id, sender_id, type, title, content, link, is_read, created_at)
+     VALUES (?, ?, ?, 'exam_published', ?, ?, '/', 0, ?)`
+  );
+  for (const stu of existingStudents) {
+    insNotif.run(
+      `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      stu.id,
+      params.teacherId,
+      `新练习任务：${examTitle}`,
+      `${params.teacherName}老师名下新增了「${examTitle}」（共 ${orderedQuestions.length} 题），欢迎前往练习。`,
+      now
+    );
+  }
+
+  return {
+    examId,
+    title: examTitle,
+    questionCount: orderedQuestions.length,
+  };
+}
+
+router.post('/users/teacher', async (req: AuthedRequest, res) => {
   const schema = z.object({
     username: z
       .string()
@@ -1469,6 +1596,8 @@ router.post('/users/teacher', (req: AuthedRequest, res) => {
     defaultClassName: z.string().trim().max(40).default('高一(1)班'),
     defaultGrade: z.string().trim().max(20).default('高一'),
     setAsDefaultRegistration: z.boolean().default(false),
+    assignStarterQuestions: z.boolean().default(true),
+    starterQuestionIds: z.array(z.string().trim().min(1)).max(30).optional(),
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -1487,7 +1616,7 @@ router.post('/users/teacher', (req: AuthedRequest, res) => {
 
   const teacherId = `tch-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const classId = `cls-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-  const hash = bcrypt.hashSync(parsed.data.password, 10);
+  const hash = await bcrypt.hash(parsed.data.password, 8);
   const now = new Date().toISOString();
 
   let inviteCode = generateInviteCode();
@@ -1496,6 +1625,30 @@ router.post('/users/teacher', (req: AuthedRequest, res) => {
   ) {
     inviteCode = generateInviteCode();
   }
+
+  let starterIds: string[] = [];
+  if (
+    parsed.data.starterQuestionIds &&
+    parsed.data.starterQuestionIds.length > 0
+  ) {
+    starterIds = parsed.data.starterQuestionIds;
+  } else if (parsed.data.assignStarterQuestions) {
+    const seedRows = db
+      .prepare(
+        `SELECT id FROM questions
+         WHERE status = 'published' AND visibility IN ('public', 'shared')
+         ORDER BY CASE WHEN owner_id = 'system' THEN 0 ELSE 1 END, created_at ASC
+         LIMIT 4`
+      )
+      .all() as Array<{ id: string }>;
+    starterIds = seedRows.map((r) => r.id);
+  }
+
+  let assignedExam: {
+    examId: string;
+    title: string;
+    questionCount: number;
+  } | null = null;
 
   db.transaction(() => {
     db.prepare(
@@ -1518,6 +1671,16 @@ router.post('/users/teacher', (req: AuthedRequest, res) => {
       now,
       now
     );
+
+    if (starterIds.length > 0) {
+      assignedExam = createTeacherAssignedExam(db, {
+        teacherId,
+        teacherName: parsed.data.realName,
+        classIds: [classId],
+        questionIds: starterIds,
+        title: `${parsed.data.defaultClassName || '默认班级'} 初始操作题练习`,
+      });
+    }
   })();
 
   if (parsed.data.setAsDefaultRegistration) {
@@ -1530,10 +1693,121 @@ router.post('/users/teacher', (req: AuthedRequest, res) => {
     '创建教师账号',
     'user',
     teacherId,
-    `${parsed.data.realName} (${parsed.data.username})${parsed.data.setAsDefaultRegistration ? ' [设为默认新生归属]' : ''}`
+    `${parsed.data.realName} (${parsed.data.username})${parsed.data.setAsDefaultRegistration ? ' [设为默认新生归属]' : ''}${assignedExam ? ` [已分配 ${(assignedExam as { questionCount: number }).questionCount} 题]` : ''}`
   );
 
-  res.status(201).json({ id: teacherId, classId, inviteCode });
+  res.status(201).json({
+    id: teacherId,
+    classId,
+    inviteCode,
+    assignedExamId: assignedExam ? (assignedExam as { examId: string }).examId : null,
+    assignedQuestionCount: assignedExam
+      ? (assignedExam as { questionCount: number }).questionCount
+      : 0,
+  });
+});
+
+router.post('/users/:id/assign-questions', (req: AuthedRequest, res) => {
+  const schema = z.object({
+    title: z.string().trim().max(80).optional(),
+    questionIds: z
+      .array(z.string().trim().min(1))
+      .min(1, '请至少选择 1 道试题')
+      .max(30),
+    classIds: z.array(z.string().trim().min(1)).optional(),
+    duration: z.number().int().min(5).max(300).default(45),
+    maxAttempts: z.number().int().min(1).max(20).default(5),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res
+      .status(400)
+      .json({ error: parsed.error.issues[0]?.message || '分配参数无效' });
+    return;
+  }
+
+  const db = getDb();
+  const teacherId = String(req.params.id);
+  const teacher = db
+    .prepare(
+      "SELECT id, username, real_name, is_disabled FROM users WHERE id = ? AND role = 'teacher'"
+    )
+    .get(teacherId) as
+    | { id: string; username: string; real_name: string; is_disabled: number }
+    | undefined;
+  if (!teacher) {
+    res.status(404).json({ error: '教师账号不存在' });
+    return;
+  }
+
+  const teacherClasses = db
+    .prepare('SELECT id, name FROM classes WHERE teacher_id = ?')
+    .all(teacherId) as Array<{ id: string; name: string }>;
+
+  let targetClassIds = parsed.data.classIds?.filter(Boolean) || [];
+  if (targetClassIds.length > 0) {
+    const ownedSet = new Set(teacherClasses.map((c) => c.id));
+    if (targetClassIds.some((cid) => !ownedSet.has(cid))) {
+      res.status(400).json({ error: '只能分配到该教师名下的班级' });
+      return;
+    }
+  } else if (teacherClasses.length > 0) {
+    targetClassIds = teacherClasses.map((c) => c.id);
+  } else {
+    // Auto-provision default class if teacher has none
+    const newClassId = `cls-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    let inviteCode = generateInviteCode();
+    while (
+      db.prepare('SELECT id FROM classes WHERE invite_code = ?').get(inviteCode)
+    ) {
+      inviteCode = generateInviteCode();
+    }
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO classes (id, name, grade, teacher_id, invite_code, created_at, updated_at)
+       VALUES (?, '高一(1)班', '高一', ?, ?, ?, ?)`
+    ).run(newClassId, teacherId, inviteCode, now, now);
+    targetClassIds = [newClassId];
+  }
+
+  let result: {
+    examId: string;
+    title: string;
+    questionCount: number;
+  } | null = null;
+
+  db.transaction(() => {
+    result = createTeacherAssignedExam(db, {
+      teacherId,
+      teacherName: teacher.real_name || teacher.username,
+      classIds: targetClassIds,
+      questionIds: parsed.data.questionIds,
+      title: parsed.data.title,
+      duration: parsed.data.duration,
+      maxAttempts: parsed.data.maxAttempts,
+    });
+  })();
+
+  if (!result) {
+    res.status(400).json({ error: '未找到可用的已发布试题' });
+    return;
+  }
+
+  const created = result as {
+    examId: string;
+    title: string;
+    questionCount: number;
+  };
+  logAdminAction(
+    req.admin!.id,
+    req.admin!.username,
+    '为教师班级分配试题',
+    'exam',
+    created.examId,
+    `${teacher.real_name} (${teacher.username}) · ${created.title}（${created.questionCount} 题）`
+  );
+
+  res.status(201).json(created);
 });
 
 router.patch('/users/:id/role', (req: AuthedRequest, res) => {
@@ -1568,11 +1842,37 @@ router.patch('/users/:id/role', (req: AuthedRequest, res) => {
     }
   }
 
-  db.prepare('UPDATE users SET role = ?, updated_at = ? WHERE id = ?').run(
-    parsed.data.role,
-    new Date().toISOString(),
-    targetId
-  );
+  const now = new Date().toISOString();
+  db.transaction(() => {
+    db.prepare('UPDATE users SET role = ?, updated_at = ? WHERE id = ?').run(
+      parsed.data.role,
+      now,
+      targetId
+    );
+    if (parsed.data.role === 'teacher') {
+      const hasClass = db
+        .prepare('SELECT id FROM classes WHERE teacher_id = ? LIMIT 1')
+        .get(targetId);
+      if (!hasClass) {
+        let inviteCode = generateInviteCode();
+        while (
+          db.prepare('SELECT id FROM classes WHERE invite_code = ?').get(inviteCode)
+        ) {
+          inviteCode = generateInviteCode();
+        }
+        db.prepare(
+          `INSERT INTO classes (id, name, grade, teacher_id, invite_code, created_at, updated_at)
+           VALUES (?, '高一(1)班', '高一', ?, ?, ?, ?)`
+        ).run(
+          `cls-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          targetId,
+          inviteCode,
+          now,
+          now
+        );
+      }
+    }
+  })();
 
   logAdminAction(
     req.admin!.id,

@@ -8,13 +8,14 @@ import {
   KeyRound,
   Loader2,
   Search,
+  Send,
   Shield,
   UserCheck,
   UserPlus,
   X,
 } from 'lucide-react';
 import { adminFetch } from '@/lib/api';
-import type { UserRole } from '@/lib/types';
+import { TYPE_LABELS, type QuestionType, type UserRole } from '@/lib/types';
 
 interface TeacherClassBrief {
   id: string;
@@ -60,6 +61,14 @@ interface DefaultRegistrationInfo {
   grade: string;
 }
 
+interface BankQuestionBrief {
+  id: string;
+  title: string;
+  type: QuestionType;
+  difficulty: string;
+  totalScore: number;
+}
+
 const ROLE_LABELS: Record<UserRole, string> = {
   super_admin: '超级管理员',
   teacher: '教师',
@@ -79,6 +88,10 @@ export default function AdminUsersTab() {
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
+  // Published bank questions cache for assigning to teachers
+  const [bankQuestions, setBankQuestions] = useState<BankQuestionBrief[]>([]);
+  const [loadingBankQ, setLoadingBankQ] = useState(false);
+
   // Create Teacher Modal
   const [createOpen, setCreateOpen] = useState(false);
   const [tForm, setTForm] = useState({
@@ -88,7 +101,9 @@ export default function AdminUsersTab() {
     defaultGrade: '高一',
     defaultClassName: '高一(1)班',
     setAsDefaultRegistration: false,
+    assignStarterQuestions: true,
   });
+  const [starterQuestionIds, setStarterQuestionIds] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
 
   // Set Default Registration Teacher Modal
@@ -96,6 +111,13 @@ export default function AdminUsersTab() {
     useState<AdminUserRow | null>(null);
   const [defaultTargetClassId, setDefaultTargetClassId] = useState('');
   const [savingDefault, setSavingDefault] = useState(false);
+
+  // Assign Questions to Existing Teacher Modal
+  const [assignQTeacher, setAssignQTeacher] = useState<AdminUserRow | null>(null);
+  const [assignQClassIds, setAssignQClassIds] = useState<string[]>([]);
+  const [assignQTitle, setAssignQTitle] = useState('会考操作题专项练习');
+  const [assignQIds, setAssignQIds] = useState<string[]>([]);
+  const [assignQSubmitting, setAssignQSubmitting] = useState(false);
 
   // Reset Password Modal
   const [resetTarget, setResetTarget] = useState<AdminUserRow | null>(null);
@@ -170,21 +192,54 @@ export default function AdminUsersTab() {
     };
   }, [roleFilter]);
 
+  const ensureBankQuestionsLoaded = async (): Promise<BankQuestionBrief[]> => {
+    if (bankQuestions.length > 0) return bankQuestions;
+    setLoadingBankQ(true);
+    try {
+      const res = await adminFetch<{ items: BankQuestionBrief[] }>(
+        '/api/admin/questions?status=published&pageSize=50'
+      );
+      setBankQuestions(res.items);
+      return res.items;
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '加载系统题库失败');
+      return [];
+    } finally {
+      setLoadingBankQ(false);
+    }
+  };
+
+  const openCreateTeacherModal = async () => {
+    setErr('');
+    setCreateOpen(true);
+    const list = await ensureBankQuestionsLoaded();
+    if (list.length > 0) {
+      setStarterQuestionIds(list.slice(0, 4).map((q) => q.id));
+    }
+  };
+
   const handleCreateTeacher = async (e: React.FormEvent) => {
     e.preventDefault();
     setCreating(true);
     setErr('');
     try {
-      await adminFetch<{ id: string; classId: string }>(
-        '/api/admin/users/teacher',
-        {
-          method: 'POST',
-          body: JSON.stringify(tForm),
-        }
-      );
+      const res = await adminFetch<{
+        id: string;
+        classId: string;
+        assignedQuestionCount?: number;
+      }>('/api/admin/users/teacher', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...tForm,
+          starterQuestionIds: tForm.assignStarterQuestions
+            ? starterQuestionIds
+            : [],
+        }),
+      });
       setCreateOpen(false);
       const classLabel = tForm.defaultClassName || '高一(1)班';
       const wasDefault = tForm.setAsDefaultRegistration;
+      const qCount = res.assignedQuestionCount || 0;
       setTForm({
         username: '',
         realName: '',
@@ -192,17 +247,64 @@ export default function AdminUsersTab() {
         defaultGrade: '高一',
         defaultClassName: '高一(1)班',
         setAsDefaultRegistration: false,
+        assignStarterQuestions: true,
       });
       setMsg(
-        `教师账号创建成功，并已为其初始化默认班级「${classLabel}」${
-          wasDefault ? '，同时设为新注册学生默认归属教师' : ''
-        }`
+        `教师账号创建成功，已初始化默认班级「${classLabel}」${
+          qCount > 0 ? `并分配 ${qCount} 道初始操作题` : ''
+        }${wasDefault ? '，同时设为新注册学生默认归属教师' : ''}`
       );
       void load(1);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '创建教师账号失败');
     } finally {
       setCreating(false);
+    }
+  };
+
+  const openAssignTeacherQuestionsModal = async (u: AdminUserRow) => {
+    setErr('');
+    setAssignQTeacher(u);
+    setAssignQTitle(`${u.realName || u.username}老师专项操作练习`);
+    setAssignQClassIds(u.teacherClasses?.map((c) => c.id) || []);
+    const list = await ensureBankQuestionsLoaded();
+    if (list.length > 0) {
+      setAssignQIds(list.slice(0, 4).map((q) => q.id));
+    } else {
+      setAssignQIds([]);
+    }
+  };
+
+  const handleAssignTeacherQuestions = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!assignQTeacher) return;
+    if (assignQIds.length === 0) {
+      setErr('请至少勾选 1 道要分配的试题');
+      return;
+    }
+    setAssignQSubmitting(true);
+    setErr('');
+    try {
+      const res = await adminFetch<{
+        examId: string;
+        title: string;
+        questionCount: number;
+      }>(`/api/admin/users/${assignQTeacher.id}/assign-questions`, {
+        method: 'POST',
+        body: JSON.stringify({
+          title: assignQTitle.trim() || undefined,
+          questionIds: assignQIds,
+          classIds: assignQClassIds.length > 0 ? assignQClassIds : undefined,
+        }),
+      });
+      setMsg(
+        `已为教师「${assignQTeacher.realName}」的班级分配并发布「${res.title}」（共 ${res.questionCount} 道题），归属该教师的学生登录后即可直接作答`
+      );
+      setAssignQTeacher(null);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '分配试题失败');
+    } finally {
+      setAssignQSubmitting(false);
     }
   };
 
@@ -337,7 +439,7 @@ export default function AdminUsersTab() {
         </div>
         <button
           type="button"
-          onClick={() => setCreateOpen(true)}
+          onClick={() => void openCreateTeacherModal()}
           className="h-9 px-4 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5 self-start"
         >
           <UserPlus className="w-3.5 h-3.5" />
@@ -506,18 +608,28 @@ export default function AdminUsersTab() {
                     </td>
                     <td className="py-3 px-4 text-right space-x-2.5 whitespace-nowrap">
                       {u.role === 'teacher' && !u.isDisabled && (
-                        <button
-                          type="button"
-                          onClick={() => openDefaultTeacherModal(u)}
-                          className="text-teal-700 hover:underline inline-flex items-center gap-0.5 font-medium"
-                        >
-                          <UserCheck className="w-3 h-3" />
-                          <span>
-                            {u.isDefaultRegistrationTeacher
-                              ? '调整默认班级'
-                              : '设为默认归属'}
-                          </span>
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => void openAssignTeacherQuestionsModal(u)}
+                            className="text-sky-700 hover:underline inline-flex items-center gap-0.5 font-medium"
+                          >
+                            <Send className="w-3 h-3" />
+                            <span>分配试题</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openDefaultTeacherModal(u)}
+                            className="text-teal-700 hover:underline inline-flex items-center gap-0.5 font-medium"
+                          >
+                            <UserCheck className="w-3 h-3" />
+                            <span>
+                              {u.isDefaultRegistrationTeacher
+                                ? '调整默认班级'
+                                : '设为默认归属'}
+                            </span>
+                          </button>
+                        </>
                       )}
                       {u.role === 'student' && (
                         <button
@@ -605,7 +717,7 @@ export default function AdminUsersTab() {
         <div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4">
           <form
             onSubmit={handleCreateTeacher}
-            className="bg-white rounded-2xl border border-slate-200 p-5 w-full max-w-sm space-y-3.5 text-xs"
+            className="bg-white rounded-2xl border border-slate-200 p-5 w-full max-w-lg max-h-[90vh] overflow-y-auto space-y-3.5 text-xs"
           >
             <div className="flex items-center justify-between">
               <h3 className="text-base font-bold text-slate-900">创建教师账号</h3>
@@ -618,28 +730,31 @@ export default function AdminUsersTab() {
               </button>
             </div>
 
-            <label className="block space-y-1">
-              <span className="font-medium text-slate-700">教师登录用户名</span>
-              <input
-                type="text"
-                required
-                value={tForm.username}
-                onChange={(e) => setTForm({ ...tForm, username: e.target.value })}
-                placeholder="字母、数字或下划线"
-                className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm"
-              />
-            </label>
-            <label className="block space-y-1">
-              <span className="font-medium text-slate-700">教师姓名</span>
-              <input
-                type="text"
-                required
-                value={tForm.realName}
-                onChange={(e) => setTForm({ ...tForm, realName: e.target.value })}
-                placeholder="例如：张敏"
-                className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm"
-              />
-            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="block space-y-1">
+                <span className="font-medium text-slate-700">教师登录用户名</span>
+                <input
+                  type="text"
+                  required
+                  value={tForm.username}
+                  onChange={(e) => setTForm({ ...tForm, username: e.target.value })}
+                  placeholder="字母、数字或下划线"
+                  className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm"
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="font-medium text-slate-700">教师姓名</span>
+                <input
+                  type="text"
+                  required
+                  value={tForm.realName}
+                  onChange={(e) => setTForm({ ...tForm, realName: e.target.value })}
+                  placeholder="例如：张敏"
+                  className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm"
+                />
+              </label>
+            </div>
+
             <label className="block space-y-1">
               <span className="font-medium text-slate-700">初始密码（至少 6 位）</span>
               <input
@@ -694,6 +809,86 @@ export default function AdminUsersTab() {
               </span>
             </label>
 
+            <div className="pt-2 border-t border-slate-100 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={tForm.assignStarterQuestions}
+                    onChange={(e) =>
+                      setTForm({
+                        ...tForm,
+                        assignStarterQuestions: e.target.checked,
+                      })
+                    }
+                    className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                  />
+                  <span className="font-semibold text-slate-800">
+                    同时为该教师班级分配初始试题（学生注册后即可见）
+                  </span>
+                </label>
+                {tForm.assignStarterQuestions && bankQuestions.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setStarterQuestionIds(
+                        starterQuestionIds.length === bankQuestions.length
+                          ? []
+                          : bankQuestions.map((q) => q.id)
+                      )
+                    }
+                    className="text-sky-700 hover:underline"
+                  >
+                    {starterQuestionIds.length === bankQuestions.length
+                      ? '全不选'
+                      : '全选'}
+                  </button>
+                )}
+              </div>
+
+              {tForm.assignStarterQuestions && (
+                <div className="max-h-36 overflow-y-auto border border-slate-200 rounded-xl p-2 space-y-1 bg-slate-50">
+                  {loadingBankQ ? (
+                    <div className="py-4 flex justify-center">
+                      <Loader2 className="w-4 h-4 text-sky-600 animate-spin" />
+                    </div>
+                  ) : bankQuestions.length === 0 ? (
+                    <div className="py-3 text-center text-slate-500">
+                      暂无已发布题目，教师登录后可在「出题中心」自主出题或分配
+                    </div>
+                  ) : (
+                    bankQuestions.map((q) => (
+                      <label
+                        key={q.id}
+                        className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-white border border-slate-200 cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <input
+                            type="checkbox"
+                            checked={starterQuestionIds.includes(q.id)}
+                            onChange={() =>
+                              setStarterQuestionIds((prev) =>
+                                prev.includes(q.id)
+                                  ? prev.filter((id) => id !== q.id)
+                                  : [...prev, q.id]
+                              )
+                            }
+                            className="rounded border-slate-300 text-sky-600 shrink-0"
+                          />
+                          <span className="truncate text-slate-800 font-medium">
+                            {q.title}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-slate-500 shrink-0 ml-2">
+                          {TYPE_LABELS[q.type]} · {q.difficulty}
+                        </span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
@@ -708,6 +903,176 @@ export default function AdminUsersTab() {
                 className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-medium"
               >
                 {creating ? '创建中...' : '确认创建'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Assign Questions to Teacher Modal */}
+      {assignQTeacher && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4">
+          <form
+            onSubmit={handleAssignTeacherQuestions}
+            className="bg-white rounded-2xl border border-slate-200 p-5 w-full max-w-lg max-h-[90vh] overflow-y-auto space-y-4 text-xs"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  为教师分配练习试题 - {assignQTeacher.realName}（
+                  {assignQTeacher.username}）
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  分配后将立即发布到该教师名下班级，归属该教师的学生登录后即可看到并作答
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAssignQTeacher(null)}
+                className="p-1 text-slate-500 hover:bg-slate-100 rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <label className="block space-y-1">
+              <span className="font-medium text-slate-700">练习任务名称</span>
+              <input
+                type="text"
+                required
+                minLength={2}
+                maxLength={80}
+                value={assignQTitle}
+                onChange={(e) => setAssignQTitle(e.target.value)}
+                className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm"
+              />
+            </label>
+
+            {assignQTeacher.teacherClasses &&
+              assignQTeacher.teacherClasses.length > 0 && (
+                <div className="space-y-1.5">
+                  <span className="font-medium text-slate-700 block">
+                    分配到该教师名下的班级
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {assignQTeacher.teacherClasses.map((cls) => (
+                      <label
+                        key={cls.id}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={assignQClassIds.includes(cls.id)}
+                          onChange={() =>
+                            setAssignQClassIds((prev) =>
+                              prev.includes(cls.id)
+                                ? prev.filter((id) => id !== cls.id)
+                                : [...prev, cls.id]
+                            )
+                          }
+                          className="rounded border-slate-300 text-sky-600"
+                        />
+                        <span>
+                          {cls.grade} {cls.name}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="font-medium text-slate-700">
+                  勾选要分配的已发布试题（已选 {assignQIds.length} 题）
+                </span>
+                {bankQuestions.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setAssignQIds(bankQuestions.map((q) => q.id))
+                      }
+                      className="text-sky-700 hover:underline"
+                    >
+                      全选
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAssignQIds([])}
+                      className="text-slate-500 hover:underline"
+                    >
+                      清空
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="max-h-52 overflow-y-auto border border-slate-200 rounded-xl p-2 space-y-1.5 bg-slate-50">
+                {loadingBankQ ? (
+                  <div className="py-6 flex justify-center">
+                    <Loader2 className="w-5 h-5 text-sky-600 animate-spin" />
+                  </div>
+                ) : bankQuestions.length === 0 ? (
+                  <div className="py-6 text-center text-slate-500">
+                    系统题库暂无已发布试题
+                  </div>
+                ) : (
+                  bankQuestions.map((q) => (
+                    <label
+                      key={q.id}
+                      className="flex items-center justify-between px-2.5 py-2 rounded-lg bg-white border border-slate-200 cursor-pointer hover:border-sky-300"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={assignQIds.includes(q.id)}
+                          onChange={() =>
+                            setAssignQIds((prev) =>
+                              prev.includes(q.id)
+                                ? prev.filter((id) => id !== q.id)
+                                : [...prev, q.id]
+                            )
+                          }
+                          className="rounded border-slate-300 text-sky-600 shrink-0"
+                        />
+                        <span className="truncate font-medium text-slate-900">
+                          {q.title}
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-slate-500 shrink-0 ml-2">
+                        {TYPE_LABELS[q.type]} · {q.difficulty} · {q.totalScore}分
+                      </span>
+                    </label>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setAssignQTeacher(null)}
+                className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg"
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                disabled={assignQSubmitting || assignQIds.length === 0}
+                className="px-4 py-2 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white rounded-lg font-medium inline-flex items-center gap-1.5"
+              >
+                {assignQSubmitting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>分配中...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-3.5 h-3.5" />
+                    <span>确认分配并发布</span>
+                  </>
+                )}
               </button>
             </div>
           </form>

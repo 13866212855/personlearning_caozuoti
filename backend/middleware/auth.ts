@@ -77,21 +77,28 @@ function extractClientIp(req: Request): string {
 
 export const loginRateLimiter = rateLimit({
   windowMs: 10 * 60 * 1000, // 10 minutes
-  max: 25,
+  max: 20,
+  skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => extractClientIp(req),
+  keyGenerator: (req) => {
+    const ip = extractClientIp(req);
+    const uname = String(req.body?.username || '').trim().toLowerCase();
+    return uname ? `${ip}:${uname}` : ip;
+  },
   message: { error: '登录尝试过于频繁，请 10 分钟后再试' },
 });
 
-// Student self-registration rate limiter to prevent automated account spam.
+// Student self-registration rate limiter: allow full classrooms sharing a school NAT IP
+// while blocking automated flood abuse and ignoring failed validation attempts.
 export const registerRateLimiter = rateLimit({
   windowMs: 10 * 60 * 1000, // 10 minutes
-  max: 30,
+  max: 500,
+  skipFailedRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => extractClientIp(req),
-  message: { error: '注册操作过于频繁，请 10 分钟后再试' },
+  message: { error: '注册操作过于频繁，请稍后再试' },
 });
 
 export function signPortalToken(payload: PortalJwtPayload): string {

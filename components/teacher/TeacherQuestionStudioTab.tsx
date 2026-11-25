@@ -15,8 +15,10 @@ import {
   RefreshCw,
   Save,
   Search,
+  Send,
   Sparkles,
   Trash2,
+  Users,
   X,
   XCircle,
 } from 'lucide-react';
@@ -84,6 +86,27 @@ export default function TeacherQuestionStudioTab() {
   // Quick Edit Bank Question Modal
   const [editTarget, setEditTarget] = useState<FullQuestion | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+
+  // Quick Assign Questions to Class/Student Modal
+  const [selectedBankIds, setSelectedBankIds] = useState<string[]>([]);
+  const [assignModalOpen, setAssignModalOpen] = useState(false);
+  const [assignQuestionIds, setAssignQuestionIds] = useState<string[]>([]);
+  const [assignTitle, setAssignTitle] = useState('');
+  const [assignTargetType, setAssignTargetType] = useState<'class' | 'student'>('class');
+  const [assignTargetIds, setAssignTargetIds] = useState<string[]>([]);
+  const [assignClasses, setAssignClasses] = useState<
+    Array<{ id: string; name: string; grade: string; studentCount: number }>
+  >([]);
+  const [assignStudents, setAssignStudents] = useState<
+    Array<{ id: string; realName: string; username: string; className: string }>
+  >([]);
+  const [assignLoadingTargets, setAssignLoadingTargets] = useState(false);
+  const [assignDuration, setAssignDuration] = useState(40);
+  const [assignMaxAttempts, setAssignMaxAttempts] = useState(3);
+  const [assignAnswerPolicy, setAssignAnswerPolicy] = useState<
+    'immediate' | 'after_end' | 'never'
+  >('immediate');
+  const [assignSubmitting, setAssignSubmitting] = useState(false);
 
   const loadBank = useCallback(
     async (page = bankPage) => {
@@ -413,6 +436,118 @@ export default function TeacherQuestionStudioTab() {
       setErr(e instanceof Error ? e.message : '保存修改失败');
     } finally {
       setSavingEdit(false);
+    }
+  };
+
+  const toggleSelectBankQuestion = (id: string) => {
+    setSelectedBankIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const allCurrentPageSelected =
+    bankItems.length > 0 &&
+    bankItems.every((item) => selectedBankIds.includes(item.id));
+
+  const toggleSelectAllPage = () => {
+    if (allCurrentPageSelected) {
+      const pageIds = new Set(bankItems.map((i) => i.id));
+      setSelectedBankIds((prev) => prev.filter((id) => !pageIds.has(id)));
+    } else {
+      const merged = new Set([
+        ...selectedBankIds,
+        ...bankItems.map((i) => i.id),
+      ]);
+      setSelectedBankIds(Array.from(merged));
+    }
+  };
+
+  const openAssignModal = async (qIds: string[], sampleTitle?: string) => {
+    if (qIds.length === 0) return;
+    setErr('');
+    setAssignQuestionIds(qIds);
+    setAssignTitle(
+      qIds.length === 1 && sampleTitle
+        ? `操作练习：${sampleTitle}`.slice(0, 60)
+        : `专项操作练习（共 ${qIds.length} 题）`
+    );
+    setAssignTargetType('class');
+    setAssignModalOpen(true);
+    setAssignLoadingTargets(true);
+    try {
+      const [clsRes, stuRes] = await Promise.all([
+        portalFetch<{
+          items: Array<{
+            id: string;
+            name: string;
+            grade: string;
+            studentCount: number;
+          }>;
+        }>('/api/teacher/classes'),
+        portalFetch<{
+          items: Array<{
+            id: string;
+            realName: string;
+            username: string;
+            className: string;
+          }>;
+        }>('/api/teacher/students'),
+      ]);
+      setAssignClasses(clsRes.items);
+      setAssignStudents(stuRes.items);
+      setAssignTargetIds(clsRes.items.map((c) => c.id));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '加载班级与学生名单失败');
+    } finally {
+      setAssignLoadingTargets(false);
+    }
+  };
+
+  const toggleAssignTargetId = (id: string) => {
+    setAssignTargetIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const handleConfirmAssign = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (assignTargetIds.length === 0) {
+      setErr('请至少选择 1 个班级或学生');
+      return;
+    }
+    setAssignSubmitting(true);
+    setErr('');
+    try {
+      const res = await portalFetch<{
+        examId: string;
+        title: string;
+        questionCount: number;
+        assignedStudentCount: number;
+      }>('/api/teacher/questions/assign', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: assignTitle.trim() || undefined,
+          questionIds: assignQuestionIds,
+          targetType: assignTargetType,
+          targetIds: assignTargetIds,
+          duration: assignDuration,
+          maxAttempts: assignMaxAttempts,
+          showAnswerPolicy: assignAnswerPolicy,
+          antiCheatSwitch: false,
+          validDays: 90,
+        }),
+      });
+      setAssignModalOpen(false);
+      setSelectedBankIds([]);
+      setMsg(
+        `已成功发布「${res.title}」（共 ${res.questionCount} 题），已分配给所选${
+          assignTargetType === 'class' ? '班级' : '学生'
+        }（当前覆盖 ${res.assignedStudentCount} 名已注册学生，新加入该班级的学生也会自动看到）`
+      );
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '分配试题失败');
+    } finally {
+      setAssignSubmitting(false);
     }
   };
 
@@ -927,6 +1062,37 @@ export default function TeacherQuestionStudioTab() {
             </div>
           </div>
 
+          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 rounded-xl bg-sky-50/70 border border-sky-200 text-xs">
+            <div className="flex items-center gap-2 text-sky-900">
+              <Users className="w-4 h-4 text-sky-600 shrink-0" />
+              <span>
+                勾选下方任意试题后，可点击「分配给学生」直接发布到名下班级（新注册进入该班级的学生也会自动看到）。
+              </span>
+            </div>
+            {selectedBankIds.length > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-sky-800">
+                  已选 {selectedBankIds.length} 题
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void openAssignModal(selectedBankIds)}
+                  className="h-7 px-3 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-medium inline-flex items-center gap-1"
+                >
+                  <Send className="w-3 h-3" />
+                  <span>批量分配给学生</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedBankIds([])}
+                  className="h-7 px-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-lg"
+                >
+                  清空
+                </button>
+              </div>
+            )}
+          </div>
+
           <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
             {bankLoading ? (
               <div className="py-16 flex justify-center">
@@ -941,6 +1107,15 @@ export default function TeacherQuestionStudioTab() {
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
                     <tr className="bg-slate-50 border-b border-slate-200 text-slate-500">
+                      <th className="py-3 pl-4 pr-2 w-9">
+                        <input
+                          type="checkbox"
+                          checked={allCurrentPageSelected}
+                          onChange={toggleSelectAllPage}
+                          aria-label="全选本页题目"
+                          className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                        />
+                      </th>
                       <th className="py-3 px-4 font-medium">题目与知识点</th>
                       <th className="py-3 px-4 font-medium">题型 / 难度</th>
                       <th className="py-3 px-4 font-medium">归属与可见性</th>
@@ -951,6 +1126,15 @@ export default function TeacherQuestionStudioTab() {
                   <tbody className="divide-y divide-slate-100">
                     {bankItems.map((q) => (
                       <tr key={q.id} className="hover:bg-slate-50">
+                        <td className="py-3 pl-4 pr-2">
+                          <input
+                            type="checkbox"
+                            checked={selectedBankIds.includes(q.id)}
+                            onChange={() => toggleSelectBankQuestion(q.id)}
+                            aria-label={`选择题目 ${q.title}`}
+                            className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                          />
+                        </td>
                         <td className="py-3 px-4 max-w-sm">
                           <div className="font-semibold text-slate-900">{q.title}</div>
                           <div className="text-[11px] text-slate-500 mt-0.5 truncate">
@@ -986,6 +1170,14 @@ export default function TeacherQuestionStudioTab() {
                           {q.totalScore}
                         </td>
                         <td className="py-3 px-4 text-right whitespace-nowrap space-x-2.5">
+                          <button
+                            type="button"
+                            onClick={() => void openAssignModal([q.id], q.title)}
+                            className="text-teal-700 font-semibold hover:underline inline-flex items-center gap-0.5"
+                          >
+                            <Send className="w-3 h-3" />
+                            <span>分配给学生</span>
+                          </button>
                           <button
                             type="button"
                             onClick={() => openTrial(q)}
@@ -1294,6 +1486,221 @@ export default function TeacherQuestionStudioTab() {
                 className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-medium"
               >
                 {savingEdit ? '保存中...' : '保存修改'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ==================== Quick Assign Questions Modal ==================== */}
+      {assignModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4">
+          <form
+            onSubmit={handleConfirmAssign}
+            className="bg-white rounded-2xl border border-slate-200 p-5 w-full max-w-lg max-h-[90vh] overflow-y-auto space-y-4 text-xs"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  分配试题给班级 / 学生
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  已选 {assignQuestionIds.length} 道试题，提交后立即发布，学生登录后即可开始作答
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAssignModalOpen(false)}
+                className="p-1 text-slate-500 hover:bg-slate-100 rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <label className="block space-y-1">
+              <span className="font-medium text-slate-700">任务 / 练习名称</span>
+              <input
+                type="text"
+                required
+                minLength={2}
+                maxLength={80}
+                value={assignTitle}
+                onChange={(e) => setAssignTitle(e.target.value)}
+                placeholder="例如：高一会考 Word 与 Excel 专项练习"
+                className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm"
+              />
+            </label>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-medium text-slate-700">分配对象</span>
+                <div className="inline-flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAssignTargetType('class');
+                      setAssignTargetIds(assignClasses.map((c) => c.id));
+                    }}
+                    className={`px-2.5 py-1 rounded-md font-medium ${
+                      assignTargetType === 'class'
+                        ? 'bg-white text-sky-700 shadow-xs'
+                        : 'text-slate-600'
+                    }`}
+                  >
+                    按班级分配
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAssignTargetType('student');
+                      setAssignTargetIds([]);
+                    }}
+                    className={`px-2.5 py-1 rounded-md font-medium ${
+                      assignTargetType === 'student'
+                        ? 'bg-white text-sky-700 shadow-xs'
+                        : 'text-slate-600'
+                    }`}
+                  >
+                    按指定学生分配
+                  </button>
+                </div>
+              </div>
+
+              <div className="max-h-44 overflow-y-auto border border-slate-200 rounded-xl p-2.5 space-y-1.5 bg-slate-50/50">
+                {assignLoadingTargets ? (
+                  <div className="py-6 flex justify-center">
+                    <Loader2 className="w-5 h-5 text-sky-600 animate-spin" />
+                  </div>
+                ) : assignTargetType === 'class' ? (
+                  assignClasses.length === 0 ? (
+                    <div className="py-4 text-center text-slate-500">
+                      您名下暂无班级，请先在「班级与学生」创建班级
+                    </div>
+                  ) : (
+                    assignClasses.map((cls) => (
+                      <label
+                        key={cls.id}
+                        className="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200 cursor-pointer hover:border-sky-300"
+                      >
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={assignTargetIds.includes(cls.id)}
+                            onChange={() => toggleAssignTargetId(cls.id)}
+                            className="rounded border-slate-300 text-sky-600"
+                          />
+                          <span className="font-medium text-slate-900">
+                            {cls.grade} {cls.name}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-slate-500 tabular-nums">
+                          {cls.studentCount} 名学生
+                        </span>
+                      </label>
+                    ))
+                  )
+                ) : assignStudents.length === 0 ? (
+                  <div className="py-4 text-center text-slate-500">
+                    名下暂无学生，按班级分配后新注册的学生也能自动看到试题
+                  </div>
+                ) : (
+                  assignStudents.map((stu) => (
+                    <label
+                      key={stu.id}
+                      className="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200 cursor-pointer hover:border-sky-300"
+                    >
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={assignTargetIds.includes(stu.id)}
+                          onChange={() => toggleAssignTargetId(stu.id)}
+                          className="rounded border-slate-300 text-sky-600"
+                        />
+                        <span className="font-medium text-slate-900">
+                          {stu.realName}
+                        </span>
+                        <span className="text-slate-400 font-mono">
+                          ({stu.username})
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-slate-500">
+                        {stu.className}
+                      </span>
+                    </label>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2.5">
+              <label className="block space-y-1">
+                <span className="font-medium text-slate-700">练习时长（分）</span>
+                <input
+                  type="number"
+                  min={5}
+                  max={300}
+                  value={assignDuration}
+                  onChange={(e) => setAssignDuration(Number(e.target.value))}
+                  className="w-full h-9 px-2.5 border border-slate-300 rounded-lg tabular-nums"
+                />
+              </label>
+
+              <label className="block space-y-1">
+                <span className="font-medium text-slate-700">可练习次数</span>
+                <select
+                  value={assignMaxAttempts}
+                  onChange={(e) => setAssignMaxAttempts(Number(e.target.value))}
+                  className="w-full h-9 px-2 border border-slate-300 rounded-lg bg-white"
+                >
+                  <option value={1}>1 次</option>
+                  <option value={3}>3 次</option>
+                  <option value={5}>5 次</option>
+                  <option value={10}>10 次</option>
+                </select>
+              </label>
+
+              <label className="block space-y-1">
+                <span className="font-medium text-slate-700">解析可见时机</span>
+                <select
+                  value={assignAnswerPolicy}
+                  onChange={(e) =>
+                    setAssignAnswerPolicy(
+                      e.target.value as 'immediate' | 'after_end' | 'never'
+                    )
+                  }
+                  className="w-full h-9 px-2 border border-slate-300 rounded-lg bg-white"
+                >
+                  <option value="immediate">交卷立即查看</option>
+                  <option value="after_end">截止后查看</option>
+                  <option value="never">暂不公开答案</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setAssignModalOpen(false)}
+                className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg"
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                disabled={assignSubmitting || assignTargetIds.length === 0}
+                className="px-4 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-lg font-medium inline-flex items-center gap-1.5"
+              >
+                {assignSubmitting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>发布分配中...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-3.5 h-3.5" />
+                    <span>立即发布给学生</span>
+                  </>
+                )}
               </button>
             </div>
           </form>

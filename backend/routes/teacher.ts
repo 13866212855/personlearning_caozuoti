@@ -818,7 +818,7 @@ router.get('/questions', (req: AuthedRequest, res) => {
   const kp = String(req.query.knowledgePoint || '');
   const keyword = String(req.query.keyword || '').trim();
   const page = Math.max(1, Number(req.query.page || 1));
-  const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize || 10)));
+  const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize || 10)));
 
   const where: string[] = ["q.status = 'published'"];
   const args: unknown[] = [];
@@ -1052,6 +1052,171 @@ router.delete('/questions/:id', (req: AuthedRequest, res) => {
     return;
   }
   res.json({ ok: true });
+});
+
+router.post('/questions/assign', (req: AuthedRequest, res) => {
+  const schema = z.object({
+    title: z.string().trim().max(80).optional(),
+    questionIds: z
+      .array(z.string().trim().min(1))
+      .min(1, '请至少选择 1 道试题')
+      .max(30),
+    targetType: z.enum(['class', 'student']).default('class'),
+    targetIds: z
+      .array(z.string().trim().min(1))
+      .min(1, '请至少选择 1 个班级或学生'),
+    duration: z.number().int().min(5).max(300).default(40),
+    maxAttempts: z.number().int().min(1).max(20).default(3),
+    showAnswerPolicy: z
+      .enum(['immediate', 'after_end', 'never'])
+      .default('immediate'),
+    antiCheatSwitch: z.boolean().default(false),
+    validDays: z.number().int().min(1).max(365).default(90),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res
+      .status(400)
+      .json({ error: parsed.error.issues[0]?.message || '分配参数错误' });
+    return;
+  }
+
+  const db = getDb();
+  const teacherId = req.teacher!.id;
+  const d = parsed.data;
+  const uniqueQuestionIds = Array.from(new Set(d.questionIds));
+  const uniqueTargetIds = Array.from(new Set(d.targetIds));
+
+  const qPlaceholders = uniqueQuestionIds.map(() => '?').join(', ');
+  const qRows = db
+    .prepare(
+      `SELECT id, title, total_score
+       FROM questions
+       WHERE status = 'published'
+         AND (owner_id = ? OR visibility IN ('public', 'shared'))
+         AND id IN (${qPlaceholders})`
+    )
+    .all(teacherId, ...uniqueQuestionIds) as Array<{
+    id: string;
+    title: string;
+    total_score: number;
+  }>;
+
+  const qMap = new Map(qRows.map((q) => [q.id, q]));
+  if (qMap.size !== uniqueQuestionIds.length) {
+    res.status(400).json({ error: '部分所选试题不存在或无权使用' });
+    return;
+  }
+
+  const tPlaceholders = uniqueTargetIds.map(() => '?').join(', ');
+  if (d.targetType === 'class') {
+    const ownedClasses = db
+      .prepare(
+        `SELECT id FROM classes WHERE teacher_id = ? AND id IN (${tPlaceholders})`
+      )
+      .all(teacherId, ...uniqueTargetIds) as Array<{ id: string }>;
+    if (ownedClasses.length !== uniqueTargetIds.length) {
+      res.status(403).json({ error: '只能将试题分配给本人名下的班级' });
+      return;
+    }
+  } else {
+    const ownedStudents = db
+      .prepare(
+        `SELECT id FROM users WHERE role = 'student' AND teacher_id = ? AND id IN (${tPlaceholders})`
+      )
+      .all(teacherId, ...uniqueTargetIds) as Array<{ id: string }>;
+    if (ownedStudents.length !== uniqueTargetIds.length) {
+      res.status(403).json({ error: '只能将试题分配给本人名下的学生' });
+      return;
+    }
+  }
+
+  const firstTitle = qMap.get(uniqueQuestionIds[0])?.title || '操作题练习';
+  const examTitle =
+    d.title && d.title.length >= 2
+      ? d.title
+      : uniqueQuestionIds.length === 1
+        ? `操作练习：${firstTitle}`.slice(0, 78)
+        : `专项操作练习（共 ${uniqueQuestionIds.length} 题）`;
+
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
+  const endTime = new Date(
+    nowDate.getTime() + d.validDays * 24 * 60 * 60 * 1000
+  ).toISOString();
+  const examId = `exam-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  let notifiedCount = 0;
+
+  const tx = db.transaction(() => {
+    db.prepare(
+      `INSERT INTO exams (
+        id, title, description, teacher_id, duration, start_time, end_time,
+        max_attempts, score_policy, show_score_immediately, show_answer_policy,
+        shuffle, anti_cheat_switch, allow_late, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'highest', 1, ?, 0, ?, 1, 'published', ?, ?)`
+    ).run(
+      examId,
+      examTitle,
+      '教师从题库直接分配的专项操作练习，完成后可立即查看判分与解析。',
+      teacherId,
+      d.duration,
+      now,
+      endTime,
+      d.maxAttempts,
+      d.showAnswerPolicy,
+      d.antiCheatSwitch ? 1 : 0,
+      now,
+      now
+    );
+
+    const insQ = db.prepare(
+      'INSERT INTO exam_questions (id, exam_id, question_id, sort_order, score) VALUES (?, ?, ?, ?, ?)'
+    );
+    uniqueQuestionIds.forEach((qid, idx) => {
+      const qRow = qMap.get(qid)!;
+      insQ.run(
+        `eq-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
+        examId,
+        qid,
+        idx + 1,
+        Number(qRow.total_score || 100)
+      );
+    });
+
+    const insA = db.prepare(
+      'INSERT INTO exam_assignments (id, exam_id, target_type, target_id) VALUES (?, ?, ?, ?)'
+    );
+    uniqueTargetIds.forEach((tid, idx) => {
+      insA.run(
+        `ea-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
+        examId,
+        d.targetType,
+        tid
+      );
+    });
+
+    const targetStudents = resolveTargetStudentIds(db, examId);
+    notifiedCount = targetStudents.length;
+    for (const sid of targetStudents) {
+      insertNotification(
+        db,
+        sid,
+        teacherId,
+        'exam_published',
+        `新练习任务：${examTitle}`,
+        `${req.teacher!.realName}老师为您分配了「${examTitle}」（共 ${uniqueQuestionIds.length} 道操作题），可前往开始作答。`,
+        '/'
+      );
+    }
+  });
+
+  tx();
+  res.status(201).json({
+    examId,
+    title: examTitle,
+    questionCount: uniqueQuestionIds.length,
+    assignedStudentCount: notifiedCount,
+  });
 });
 
 // ==================== 4. Teacher Exam Management ====================
