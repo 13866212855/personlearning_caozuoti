@@ -4,6 +4,7 @@ import { getDb, rowToQuestion } from '../db';
 import { gradeAnswerDeterministic } from '../grader';
 import { type AuthedRequest, requireStudentAuth } from '../middleware/auth';
 import type { ExamQuestionResult, SimulatorState } from '../types';
+import { buildStepGuidance } from '../utils/stepGuidance';
 
 const router = Router();
 router.use(requireStudentAuth);
@@ -408,6 +409,74 @@ router.put('/:id/draft', (req: AuthedRequest, res) => {
   );
 
   res.json({ ok: true, savedAt: nowIso });
+});
+
+// Live per-step check & beginner operation guidance (never leaks referenceAnswer)
+router.post('/:id/check-step', (req: AuthedRequest, res) => {
+  const schema = z.object({
+    questionId: z.string().min(1),
+    answer: z.record(z.string(), z.unknown()),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: '步骤检查请求格式错误' });
+    return;
+  }
+
+  const db = getDb();
+  const examId = String(req.params.id);
+  const student = req.student!;
+
+  const exam = db
+    .prepare('SELECT id, status FROM exams WHERE id = ?')
+    .get(examId) as { id: string; status: string } | undefined;
+  if (!exam || exam.status === 'draft') {
+    res.status(404).json({ error: '考试不存在或尚未发布' });
+    return;
+  }
+
+  if (
+    !isStudentAssignedToExam(db, examId, student.id, student.classId || '')
+  ) {
+    res.status(403).json({ error: '您不在本次考试的参与名单中' });
+    return;
+  }
+
+  const eqRow = db
+    .prepare(
+      `SELECT q.*
+       FROM exam_questions eq
+       INNER JOIN questions q ON eq.question_id = q.id
+       WHERE eq.exam_id = ? AND q.id = ?`
+    )
+    .get(examId, parsed.data.questionId) as Record<string, unknown> | undefined;
+
+  if (!eqRow) {
+    res.status(404).json({ error: '该题目不属于本场考试' });
+    return;
+  }
+
+  const q = rowToQuestion(eqRow);
+  const answerState = parsed.data.answer as unknown as SimulatorState;
+  const grade = gradeAnswerDeterministic(q.type, q.checkpoints, answerState);
+  const touched =
+    JSON.stringify(parsed.data.answer) !==
+    JSON.stringify(q.materials.initialState);
+
+  const steps = buildStepGuidance(
+    q.type,
+    q.steps,
+    q.checkpoints,
+    grade.checkpointResults,
+    touched
+  );
+
+  res.json({
+    questionId: q.id,
+    steps,
+    passedCount: steps.filter((s) => s.passed).length,
+    totalSteps: steps.length,
+  });
 });
 
 // Submit exam for deterministic grading

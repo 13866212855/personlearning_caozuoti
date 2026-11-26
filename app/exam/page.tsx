@@ -1,20 +1,27 @@
 'use client';
 
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
+  ChevronRight,
   Clock,
+  ExternalLink,
   EyeOff,
+  HelpCircle,
   Loader2,
+  PlayCircle,
   Save,
   Send,
+  X,
   XCircle,
 } from 'lucide-react';
 import GradingReport from '@/components/GradingReport';
 import StudentHeader from '@/components/StudentHeader';
+import StepGuideShowcase from '@/components/guide/StepGuideShowcase';
 import SimulatorRenderer from '@/components/simulators/SimulatorRenderer';
 import {
   clearPortalToken,
@@ -29,6 +36,7 @@ import {
   type ClientQuestion,
   type PortalUser,
   type SimulatorState,
+  type StepCheckResultItem,
 } from '@/lib/types';
 
 function formatCountdown(sec: number): string {
@@ -87,6 +95,22 @@ function ExamContent() {
   const [confirmSubmitOpen, setConfirmSubmitOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // Per-step checking & beginner guidance state
+  const [activeStepByQ, setActiveStepByQ] = useState<Record<string, number>>({});
+  const [stepCheckByQ, setStepCheckByQ] = useState<
+    Record<string, Record<number, StepCheckResultItem>>
+  >({});
+  const [triggeredStepsByQ, setTriggeredStepsByQ] = useState<
+    Record<string, Record<number, boolean>>
+  >({});
+  const [checkingStep, setCheckingStep] = useState(false);
+  const [demoModalData, setDemoModalData] = useState<{
+    topic: string;
+    stepIndex: number;
+    questionTitle: string;
+    instruction: string;
+  } | null>(null);
+
   const [resultView, setResultView] = useState<{
     scoreVisible: boolean;
     answerVisible: boolean;
@@ -108,6 +132,7 @@ function ExamContent() {
   const elapsedRef = useRef(elapsedSeconds);
   const switchRef = useRef(switchCount);
   const submittedOnceRef = useRef(false);
+  const stepCheckDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     answersRef.current = answers;
@@ -118,6 +143,14 @@ function ExamContent() {
   useEffect(() => {
     switchRef.current = switchCount;
   }, [switchCount]);
+
+  useEffect(() => {
+    return () => {
+      if (stepCheckDebounceRef.current) {
+        clearTimeout(stepCheckDebounceRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!getPortalToken()) {
@@ -284,6 +317,88 @@ function ExamContent() {
         // silent autosave
       } finally {
         if (!silent) setSavingDraft(false);
+      }
+    },
+    [examInfo, resultView]
+  );
+
+  const checkQuestionSteps = useCallback(
+    async (
+      questionId: string,
+      answerSnapshot: SimulatorState,
+      options?: {
+        revealStepIndexes?: number[];
+        advanceFromStep?: number;
+        totalSteps?: number;
+        silent?: boolean;
+      }
+    ) => {
+      if (!examInfo || resultView || submittedOnceRef.current) return;
+      if (!options?.silent) setCheckingStep(true);
+      try {
+        const res = await portalFetch<{
+          questionId: string;
+          steps: StepCheckResultItem[];
+          passedCount: number;
+          totalSteps: number;
+        }>(`/api/exams/${examInfo.id}/check-step`, {
+          method: 'POST',
+          body: JSON.stringify({
+            questionId,
+            answer: answerSnapshot,
+          }),
+        });
+
+        const byStep: Record<number, StepCheckResultItem> = {};
+        let highestPassed = 0;
+        for (const item of res.steps) {
+          byStep[item.stepIndex] = item;
+          if (item.passed && item.stepIndex > highestPassed) {
+            highestPassed = item.stepIndex;
+          }
+        }
+
+        setStepCheckByQ((prev) => ({
+          ...prev,
+          [questionId]: byStep,
+        }));
+
+        // Reveal explicitly checked steps AND any prior unpassed steps if student already progressed to a later step
+        setTriggeredStepsByQ((prev) => {
+          const prevForQ = prev[questionId] || {};
+          const nextForQ = { ...prevForQ };
+          if (options?.revealStepIndexes) {
+            for (const idx of options.revealStepIndexes) {
+              nextForQ[idx] = true;
+            }
+          }
+          for (const item of res.steps) {
+            if (!item.passed && item.stepIndex < highestPassed) {
+              nextForQ[item.stepIndex] = true;
+            }
+          }
+          return {
+            ...prev,
+            [questionId]: nextForQ,
+          };
+        });
+
+        if (
+          typeof options?.advanceFromStep === 'number' &&
+          byStep[options.advanceFromStep]?.passed
+        ) {
+          const maxStep = options.totalSteps || res.totalSteps;
+          if (options.advanceFromStep < maxStep) {
+            setActiveStepByQ((prev) => ({
+              ...prev,
+              [questionId]: options.advanceFromStep! + 1,
+            }));
+          }
+        }
+      } catch {
+        // Do not interrupt exam flow on transient step check errors
+      } finally {
+        if (!options?.silent) setCheckingStep(false);
       }
     },
     [examInfo, resultView]
@@ -584,6 +699,51 @@ function ExamContent() {
   const currentState = currentQ ? answers[currentQ.id] : null;
   const untouchedCount = questions.filter((q) => !touchedIds[q.id]).length;
 
+  const sortedSteps = currentQ
+    ? [...currentQ.steps].sort((a, b) => a.index - b.index)
+    : [];
+  const firstStepIndex = sortedSteps[0]?.index ?? 1;
+  const lastStepIndex =
+    sortedSteps[sortedSteps.length - 1]?.index ?? sortedSteps.length;
+  const activeStep = currentQ
+    ? (activeStepByQ[currentQ.id] ?? firstStepIndex)
+    : 1;
+  const stepResults = currentQ ? stepCheckByQ[currentQ.id] || {} : {};
+  const triggeredSteps = currentQ ? triggeredStepsByQ[currentQ.id] || {} : {};
+  const passedStepCount = sortedSteps.filter(
+    (s) => stepResults[s.index]?.passed
+  ).length;
+
+  const handleSelectStep = (targetStepIndex: number) => {
+    if (!currentQ || !currentState) return;
+    const prevStepIndex = activeStep;
+    setActiveStepByQ((prev) => ({
+      ...prev,
+      [currentQ.id]: targetStepIndex,
+    }));
+    if (targetStepIndex > prevStepIndex) {
+      void checkQuestionSteps(currentQ.id, currentState, {
+        revealStepIndexes: [prevStepIndex],
+        silent: false,
+      });
+    }
+  };
+
+  const handleSimulatorChange = (next: SimulatorState) => {
+    if (!currentQ) return;
+    const qIdSnapshot = currentQ.id;
+    setAnswers((prev) => ({ ...prev, [qIdSnapshot]: next }));
+    setTouchedIds((prev) => ({ ...prev, [qIdSnapshot]: true }));
+    if (stepCheckDebounceRef.current) {
+      clearTimeout(stepCheckDebounceRef.current);
+    }
+    stepCheckDebounceRef.current = setTimeout(() => {
+      void checkQuestionSteps(qIdSnapshot, next, {
+        silent: true,
+      });
+    }, 750);
+  };
+
   return (
     <div className="h-screen flex flex-col bg-slate-100 overflow-hidden">
       {/* Exam Top Bar */}
@@ -698,56 +858,270 @@ function ExamContent() {
 
       {currentQ && currentState && (
         <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
-          <aside className="w-full lg:w-[380px] bg-slate-50 border-b lg:border-b-0 lg:border-r border-slate-200 overflow-y-auto p-4 space-y-4 shrink-0">
-            <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2">
-              <div className="text-xs text-sky-700 font-medium">
-                {TYPE_LABELS[currentQ.type]} · 本题 {currentQ.totalScore} 分
-              </div>
-              <h2 className="text-base font-bold text-slate-900">
-                {currentQ.title}
-              </h2>
-              <p className="text-xs text-slate-700 leading-relaxed">
-                {currentQ.scenario}
-              </p>
-              <div className="text-xs text-slate-500 pt-2 border-t border-slate-100">
-                素材说明：{currentQ.materials.description}
-              </div>
-            </div>
-
-            <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2.5">
-              <h3 className="text-xs font-semibold text-slate-900">
-                分步任务要求
-              </h3>
-              {currentQ.steps.map((s) => (
-                <div
-                  key={s.index}
-                  className="p-2.5 rounded-lg border border-slate-200 bg-slate-50/50 text-xs space-y-1"
-                >
-                  <div className="flex justify-between font-semibold text-sky-700">
-                    <span>第 {s.index} 步</span>
-                    <span className="tabular-nums text-slate-500">
-                      {s.score} 分
-                    </span>
-                  </div>
-                  <p className="text-slate-800 leading-relaxed">
-                    {s.instruction}
-                  </p>
+            <aside className="w-full lg:w-[400px] bg-slate-50 border-b lg:border-b-0 lg:border-r border-slate-200 overflow-y-auto p-4 space-y-4 shrink-0">
+              <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2">
+                <div className="text-xs text-sky-700 font-medium">
+                  {TYPE_LABELS[currentQ.type]} · 本题 {currentQ.totalScore} 分
                 </div>
-              ))}
-            </div>
-          </aside>
+                <h2 className="text-base font-bold text-slate-900">
+                  {currentQ.title}
+                </h2>
+                <p className="text-xs text-slate-700 leading-relaxed">
+                  {currentQ.scenario}
+                </p>
+                <div className="text-xs text-slate-500 pt-2 border-t border-slate-100">
+                  素材说明：{currentQ.materials.description}
+                </div>
+              </div>
 
-          <section className="flex-1 p-3 sm:p-4 overflow-hidden flex flex-col min-h-[420px]">
-            <SimulatorRenderer
-              type={currentQ.type}
-              value={currentState}
-              onChange={(next) => {
-                setAnswers((prev) => ({ ...prev, [currentQ.id]: next }));
-                setTouchedIds((prev) => ({ ...prev, [currentQ.id]: true }));
-              }}
-              assets={currentQ.materials.assets}
-            />
-          </section>
+              <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-xs font-semibold text-slate-900">
+                      分步任务与实时检查
+                    </h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      做完一步点「完成并检查」，做错会在对应步骤给出教程与演示
+                    </p>
+                  </div>
+                  <span className="text-[11px] font-semibold text-teal-700 tabular-nums shrink-0">
+                    已完成 {passedStepCount}/{sortedSteps.length}
+                  </span>
+                </div>
+
+                <div className="space-y-2.5">
+                  {sortedSteps.map((s) => {
+                    const isCurrent = activeStep === s.index;
+                    const res = stepResults[s.index];
+                    const isPassed = Boolean(res?.passed);
+                    const shouldShowError =
+                      Boolean(res && !res.passed) &&
+                      (Boolean(triggeredSteps[s.index]) || activeStep > s.index);
+
+                    const guideQuery = res?.demoTopic
+                      ? `/guide?topic=${encodeURIComponent(
+                          res.demoTopic
+                        )}&step=${s.index}&title=${encodeURIComponent(
+                          currentQ.title
+                        )}&instruction=${encodeURIComponent(s.instruction)}`
+                      : '/guide';
+
+                    return (
+                      <div
+                        key={s.index}
+                        className={`rounded-xl border transition-colors text-xs ${
+                          isPassed
+                            ? 'border-teal-200 bg-teal-50/40'
+                            : shouldShowError
+                              ? 'border-amber-300 bg-amber-50/50'
+                              : isCurrent
+                                ? 'border-sky-300 bg-sky-50/50'
+                                : 'border-slate-200 bg-slate-50/50'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => handleSelectStep(s.index)}
+                          className="w-full text-left p-2.5 space-y-1.5"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 font-semibold">
+                              {isPassed ? (
+                                <CheckCircle2 className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+                              ) : shouldShowError ? (
+                                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                              ) : (
+                                <span
+                                  className={`w-4 h-4 rounded-full text-[10px] flex items-center justify-center tabular-nums ${
+                                    isCurrent
+                                      ? 'bg-sky-600 text-white'
+                                      : 'bg-slate-200 text-slate-700'
+                                  }`}
+                                >
+                                  {s.index}
+                                </span>
+                              )}
+                              <span
+                                className={
+                                  isPassed
+                                    ? 'text-teal-800'
+                                    : shouldShowError
+                                      ? 'text-amber-900'
+                                      : 'text-sky-800'
+                                }
+                              >
+                                第 {s.index} 步
+                              </span>
+                              <span className="text-[11px] font-medium">
+                                {isPassed
+                                  ? '· 已通过'
+                                  : shouldShowError
+                                    ? '· 上一步检查需修正'
+                                    : isCurrent
+                                      ? '· 当前操作中'
+                                      : ''}
+                              </span>
+                            </div>
+                            <span className="tabular-nums text-slate-500 shrink-0">
+                              {s.score} 分
+                            </span>
+                          </div>
+
+                          <p className="text-slate-800 leading-relaxed">
+                            {s.instruction}
+                          </p>
+                        </button>
+
+                        {/* Action bar on active step */}
+                        {isCurrent && !isPassed && (
+                          <div className="px-2.5 pb-2.5 flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              disabled={checkingStep}
+                              onClick={() =>
+                                void checkQuestionSteps(
+                                  currentQ.id,
+                                  currentState,
+                                  {
+                                    revealStepIndexes: [s.index],
+                                    advanceFromStep: s.index,
+                                    totalSteps: lastStepIndex,
+                                    silent: false,
+                                  }
+                                )
+                              }
+                              className="h-7 px-3 rounded-lg bg-sky-600 hover:bg-sky-700 disabled:opacity-60 text-white text-[11px] font-medium flex items-center gap-1"
+                            >
+                              {checkingStep ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <ChevronRight className="w-3 h-3" />
+                              )}
+                              <span>
+                                {s.index < lastStepIndex
+                                  ? `完成第 ${s.index} 步，检查并进入下一步`
+                                  : `完成并检查第 ${s.index} 步`}
+                              </span>
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Inline concrete guidance when this step failed check */}
+                        {shouldShowError && res && (
+                          <div className="mx-2.5 mb-2.5 p-2.5 rounded-lg bg-white border border-amber-200 space-y-2 text-[11px]">
+                            <div className="flex items-start gap-1.5 text-amber-900 font-semibold">
+                              <HelpCircle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                              <span>检查发现问题：{res.feedback}</span>
+                            </div>
+
+                            {res.concreteSteps.length > 0 && (
+                              <div className="space-y-1 text-slate-700">
+                                <div className="font-semibold text-slate-900">
+                                  具体操作步骤（按下面顺序做）：
+                                </div>
+                                <ol className="list-decimal pl-4 space-y-1 leading-relaxed">
+                                  {res.concreteSteps.map((line, i) => (
+                                    <li key={i}>{line}</li>
+                                  ))}
+                                </ol>
+                              </div>
+                            )}
+
+                            {res.pitfallTip && (
+                              <div className="p-2 rounded bg-amber-50 text-amber-900 leading-relaxed">
+                                注意：{res.pitfallTip}
+                              </div>
+                            )}
+
+                            <div className="pt-1 flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setDemoModalData({
+                                    topic: res.demoTopic,
+                                    stepIndex: s.index,
+                                    questionTitle: currentQ.title,
+                                    instruction: s.instruction,
+                                  })
+                                }
+                                className="h-7 px-2.5 rounded-md bg-sky-50 border border-sky-200 text-sky-800 hover:bg-sky-100 font-medium flex items-center gap-1"
+                              >
+                                <PlayCircle className="w-3.5 h-3.5" />
+                                <span>页内看动画演示</span>
+                              </button>
+
+                              <Link
+                                href={guideQuery}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="h-7 px-2.5 rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50 font-medium flex items-center gap-1"
+                              >
+                                <span>打开独立演示页面</span>
+                                <ExternalLink className="w-3 h-3" />
+                              </Link>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </aside>
+
+            <section className="flex-1 p-3 sm:p-4 overflow-hidden flex flex-col min-h-[420px]">
+              <SimulatorRenderer
+                type={currentQ.type}
+                value={currentState}
+                onChange={handleSimulatorChange}
+                assets={currentQ.materials.assets}
+              />
+            </section>
+          </div>
+      )}
+
+      {/* In-Page Beginner Demo Modal (avoids triggering anti-cheat tab switch) */}
+      {demoModalData && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-3 sm:p-6">
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="px-4 py-3 bg-white border-b border-slate-200 flex items-center justify-between gap-3 shrink-0">
+              <div className="text-sm font-bold text-slate-900">
+                第 {demoModalData.stepIndex} 步操作动画演示（页内预览，不计入切屏）
+              </div>
+              <div className="flex items-center gap-2">
+                <Link
+                  href={`/guide?topic=${encodeURIComponent(
+                    demoModalData.topic
+                  )}&step=${demoModalData.stepIndex}&title=${encodeURIComponent(
+                    demoModalData.questionTitle
+                  )}&instruction=${encodeURIComponent(demoModalData.instruction)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="h-8 px-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs text-slate-700 flex items-center gap-1"
+                >
+                  <span>新标签页打开</span>
+                  <ExternalLink className="w-3 h-3" />
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => setDemoModalData(null)}
+                  className="h-8 px-2.5 rounded-lg bg-slate-900 text-white text-xs font-medium hover:bg-slate-800 flex items-center gap-1"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>关闭返回做题</span>
+                </button>
+              </div>
+            </div>
+            <div className="p-4 overflow-y-auto">
+              <StepGuideShowcase
+                topicId={demoModalData.topic}
+                stepNumber={demoModalData.stepIndex}
+                questionTitle={demoModalData.questionTitle}
+                stepInstruction={demoModalData.instruction}
+                allowTopicSwitch={false}
+              />
+            </div>
+          </div>
         </div>
       )}
 

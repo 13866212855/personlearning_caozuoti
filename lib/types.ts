@@ -171,6 +171,18 @@ export interface CheckpointResult {
   gradedByAi?: boolean;
 }
 
+export interface StepCheckResultItem {
+  stepIndex: number;
+  passed: boolean;
+  earnedScore: number;
+  maxScore: number;
+  feedback: string;
+  concreteSteps: string[];
+  pitfallTip: string;
+  demoTopic: string;
+  demoLabel: string;
+}
+
 export interface ExamQuestionResult {
   questionId: string;
   title: string;
@@ -179,7 +191,7 @@ export interface ExamQuestionResult {
   autoScore: number;
   finalScore: number;
   checkpointResults: CheckpointResult[];
-  gradedByAi: boolean;
+  gradedByAi?: boolean;
 }
 
 export interface SubmitResponse {
