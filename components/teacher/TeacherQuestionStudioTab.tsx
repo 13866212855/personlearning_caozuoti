@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   CheckCircle2,
   Copy,
   Database,
@@ -21,6 +22,7 @@ import {
   Users,
   X,
   XCircle,
+  Zap,
 } from 'lucide-react';
 import SimulatorRenderer from '@/components/simulators/SimulatorRenderer';
 import { portalFetch } from '@/lib/api';
@@ -36,6 +38,69 @@ import {
 
 interface PreviewQuestion extends FullQuestion {
   localId: string;
+}
+
+function createEmptySimulatorState(type: QuestionType): SimulatorState {
+  switch (type) {
+    case 'excel':
+      return { cells: {}, merges: [], charts: [] };
+    case 'web':
+      return { files: [] };
+    case 'file':
+      return { items: [] };
+    case 'python':
+      return { code: '', customInput: '', lastOutput: '', lastError: '' };
+    case 'database':
+      return { tables: [], sql: '', lastColumns: [], lastRows: [], lastChanges: 0, lastError: '' };
+    case 'word':
+    default:
+      return {
+        paragraphs: [],
+        tables: [],
+        images: [],
+        headerText: '',
+        footerText: '',
+        pageSetup: {
+          orientation: 'portrait',
+          marginTop: 2.54,
+          marginBottom: 2.54,
+          marginLeft: 3.18,
+          marginRight: 3.18,
+        },
+      };
+  }
+}
+
+function normalizeFullQuestion(raw: FullQuestion): FullQuestion {
+  const safeType: QuestionType = raw?.type || 'word';
+  const safeSteps = Array.isArray(raw?.steps) ? raw.steps : [];
+  const safeCheckpoints = Array.isArray(raw?.checkpoints) ? raw.checkpoints : [];
+  return {
+    ...raw,
+    type: safeType,
+    title: String(raw?.title || '未命名操作题'),
+    scenario: String(raw?.scenario || ''),
+    totalScore: Number(raw?.totalScore || 100),
+    knowledgePoints: Array.isArray(raw?.knowledgePoints)
+      ? raw.knowledgePoints
+      : [],
+    knowledgePointIds: Array.isArray(raw?.knowledgePointIds)
+      ? raw.knowledgePointIds
+      : [],
+    materials: raw?.materials?.initialState
+      ? raw.materials
+      : {
+          description: raw?.materials?.description || '',
+          assets: Array.isArray(raw?.materials?.assets) ? raw.materials.assets : undefined,
+          initialState: createEmptySimulatorState(safeType),
+        },
+    steps: safeSteps,
+    checkpoints: safeCheckpoints,
+    analysis: Array.isArray(raw?.analysis) ? raw.analysis : [],
+    commonMistakes: Array.isArray(raw?.commonMistakes)
+      ? raw.commonMistakes
+      : [],
+  };
 }
 
 const ANHUI_KP_PRESETS: Record<
@@ -119,6 +184,7 @@ export default function TeacherQuestionStudioTab() {
   const [addingKp, setAddingKp] = useState(false);
 
   // AI Form
+  const [genMode, setGenMode] = useState<'ai' | 'template'>('ai');
   const [aiType, setAiType] = useState<QuestionType>('excel');
   const [difficulty, setDifficulty] = useState<DifficultyLevel>('中等');
   const [count, setCount] = useState(1);
@@ -129,6 +195,7 @@ export default function TeacherQuestionStudioTab() {
   const [generating, setGenerating] = useState(false);
   const [previewList, setPreviewList] = useState<PreviewQuestion[]>([]);
   const [savingId, setSavingId] = useState('');
+  const [expandedAnalysisIds, setExpandedAnalysisIds] = useState<string[]>([]);
 
   // Bank list
   const [scope, setScope] = useState<'all' | 'mine' | 'system' | 'shared'>('all');
@@ -192,9 +259,9 @@ export default function TeacherQuestionStudioTab() {
           total: number;
           page: number;
         }>(`/api/teacher/questions?${qs.toString()}`);
-        setBankItems(res.items);
-        setBankTotal(res.total);
-        setBankPage(res.page);
+        setBankItems(Array.isArray(res?.items) ? res.items.map(normalizeFullQuestion) : []);
+        setBankTotal(Number(res?.total || 0));
+        setBankPage(Number(res?.page || 1));
       } catch (e) {
         setErr(e instanceof Error ? e.message : '加载题库失败');
       } finally {
@@ -214,8 +281,8 @@ export default function TeacherQuestionStudioTab() {
     ])
       .then(([kpRes, ovRes]) => {
         if (!active) return;
-        setKps(kpRes.items);
-        if (ovRes.aiQuota) {
+        setKps(Array.isArray(kpRes?.items) ? kpRes.items : []);
+        if (ovRes?.aiQuota) {
           const q = ovRes.aiQuota;
           setQuota({
             used: q.used ?? 0,
@@ -247,9 +314,9 @@ export default function TeacherQuestionStudioTab() {
     }>(`/api/teacher/questions?${qs.toString()}`)
       .then((res) => {
         if (!active) return;
-        setBankItems(res.items);
-        setBankTotal(res.total);
-        setBankPage(res.page);
+        setBankItems(Array.isArray(res?.items) ? res.items.map(normalizeFullQuestion) : []);
+        setBankTotal(Number(res?.total || 0));
+        setBankPage(Number(res?.page || 1));
       })
       .catch((e) => {
         if (active) setErr(e instanceof Error ? e.message : '加载题库失败');
@@ -334,7 +401,11 @@ export default function TeacherQuestionStudioTab() {
     }
   };
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (overrideMode?: 'ai' | 'template') => {
+    const activeMode = overrideMode || genMode;
+    if (overrideMode && overrideMode !== genMode) {
+      setGenMode(overrideMode);
+    }
     setGenerating(true);
     setErr('');
     setMsg('');
@@ -344,12 +415,13 @@ export default function TeacherQuestionStudioTab() {
 
     try {
       const res = await portalFetch<{
-        questions: FullQuestion[];
-        errors: string[];
-        quota: { used: number; limit: number; remaining: number };
+        questions?: FullQuestion[];
+        errors?: string[];
+        quota?: { used: number; limit: number; remaining: number };
       }>('/api/teacher/questions/ai-generate', {
         method: 'POST',
         body: JSON.stringify({
+          mode: activeMode,
           type: aiType,
           difficulty,
           count,
@@ -361,20 +433,28 @@ export default function TeacherQuestionStudioTab() {
           customPrompt: customPrompt.trim() || undefined,
         }),
       });
-      if (res.quota) setQuota(res.quota);
-      const wrapped: PreviewQuestion[] = res.questions.map((q, idx) => ({
-        ...q,
+      if (res?.quota) setQuota(res.quota);
+      const list = Array.isArray(res?.questions) ? res.questions : [];
+      if (list.length === 0) {
+        const errArr = Array.isArray(res?.errors) ? res.errors : [];
+        throw new Error(
+          errArr[0] || '出题服务未返回有效题目数据，请检查后台配置或改用「会考标准模板快速出题」'
+        );
+      }
+      const wrapped: PreviewQuestion[] = list.map((rawQ, idx) => ({
+        ...normalizeFullQuestion(rawQ),
         visibility: 'private',
         localId: `prev-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
       }));
       setPreviewList((prev) => [...wrapped, ...prev]);
+      const errArr = Array.isArray(res?.errors) ? res.errors : [];
       setMsg(
-        `AI 已生成 ${res.questions.length} 道新题目，可先编辑或点击「试做验证」后再存入题库${
-          res.errors.length > 0 ? `（部分失败：${res.errors[0]}）` : ''
+        `${activeMode === 'template' ? '会考标准模板引擎' : 'AI'}已生成 ${list.length} 道新题目，可先微调文字与步骤分值或「试做验证」后再入库${
+          errArr.length > 0 ? `（部分失败：${errArr[0]}）` : ''
         }`
       );
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'AI 生成题目失败');
+      setErr(e instanceof Error ? e.message : '生成题目失败');
     } finally {
       setGenerating(false);
     }
@@ -385,27 +465,33 @@ export default function TeacherQuestionStudioTab() {
     setErr('');
     try {
       const res = await portalFetch<{
-        questions: FullQuestion[];
-        quota: { used: number; limit: number; remaining: number };
+        questions?: FullQuestion[];
+        quota?: { used: number; limit: number; remaining: number };
       }>('/api/teacher/questions/ai-generate', {
         method: 'POST',
         body: JSON.stringify({
+          mode: genMode,
           type: q.type,
           difficulty: q.difficulty,
           count: 1,
-          stepCount: q.steps.length || stepCount,
+          stepCount: (q.steps || []).length || stepCount,
           totalScore: q.totalScore || 100,
-          knowledgePoints: q.knowledgePoints,
-          knowledgePointIds: q.knowledgePointIds || [],
+          knowledgePoints: Array.isArray(q.knowledgePoints) ? q.knowledgePoints : [],
+          knowledgePointIds: Array.isArray(q.knowledgePointIds) ? q.knowledgePointIds : [],
           customPrompt: customPrompt.trim() || undefined,
         }),
       });
-      if (res.quota) setQuota(res.quota);
-      if (res.questions[0]) {
+      if (res?.quota) setQuota(res.quota);
+      const nextQ = Array.isArray(res?.questions) ? res.questions[0] : undefined;
+      if (nextQ) {
         setPreviewList((prev) =>
           prev.map((item) =>
             item.localId === localId
-              ? { ...res.questions[0], visibility: item.visibility, localId }
+              ? {
+                  ...normalizeFullQuestion(nextQ),
+                  visibility: item.visibility,
+                  localId,
+                }
               : item
           )
         );
@@ -417,32 +503,41 @@ export default function TeacherQuestionStudioTab() {
     }
   };
 
-  const handleSaveToBank = async (q: PreviewQuestion) => {
+  const savePreviewQuestion = async (
+    q: PreviewQuestion,
+    andAssign: boolean
+  ) => {
     setSavingId(q.localId);
     setErr('');
     try {
-      await portalFetch<{ id: string }>('/api/teacher/questions', {
+      const steps = Array.isArray(q.steps) ? q.steps : [];
+      const sumStepScore = steps.reduce((acc, s) => acc + Number(s.score || 0), 0);
+      const effectiveTotal = sumStepScore > 0 ? sumStepScore : q.totalScore;
+      const saved = await portalFetch<{ id: string }>('/api/teacher/questions', {
         method: 'POST',
         body: JSON.stringify({
           title: q.title,
           type: q.type,
           difficulty: q.difficulty,
-          knowledgePoints: q.knowledgePoints,
-          knowledgePointIds: q.knowledgePointIds || [],
+          knowledgePoints: Array.isArray(q.knowledgePoints) ? q.knowledgePoints : [],
+          knowledgePointIds: Array.isArray(q.knowledgePointIds) ? q.knowledgePointIds : [],
           scenario: q.scenario,
-          totalScore: q.totalScore,
+          totalScore: effectiveTotal,
           materials: q.materials,
-          steps: q.steps,
-          checkpoints: q.checkpoints,
+          steps,
+          checkpoints: Array.isArray(q.checkpoints) ? q.checkpoints : [],
           referenceAnswer: q.referenceAnswer,
-          analysis: q.analysis,
-          commonMistakes: q.commonMistakes,
+          analysis: Array.isArray(q.analysis) ? q.analysis : [],
+          commonMistakes: Array.isArray(q.commonMistakes) ? q.commonMistakes : [],
           visibility: q.visibility === 'shared' ? 'shared' : 'private',
           source: 'ai',
         }),
       });
       setPreviewList((prev) => prev.filter((item) => item.localId !== q.localId));
       setMsg(`已将「${q.title}」存入您的题库`);
+      if (andAssign && saved?.id) {
+        await openAssignModal([saved.id], q.title);
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : '保存题目失败');
     } finally {
@@ -451,8 +546,11 @@ export default function TeacherQuestionStudioTab() {
   };
 
   const openTrial = (q: FullQuestion) => {
-    setTrialQ(q);
-    setTrialState(JSON.parse(JSON.stringify(q.materials.initialState)) as SimulatorState);
+    const normalized = normalizeFullQuestion(q);
+    setTrialQ(normalized);
+    setTrialState(
+      JSON.parse(JSON.stringify(normalized.materials.initialState)) as SimulatorState
+    );
     setTrialResult(null);
   };
 
@@ -599,9 +697,11 @@ export default function TeacherQuestionStudioTab() {
           }>;
         }>('/api/teacher/students'),
       ]);
-      setAssignClasses(clsRes.items);
-      setAssignStudents(stuRes.items);
-      setAssignTargetIds(clsRes.items.map((c) => c.id));
+      const clsItems = Array.isArray(clsRes?.items) ? clsRes.items : [];
+      const stuItems = Array.isArray(stuRes?.items) ? stuRes.items : [];
+      setAssignClasses(clsItems);
+      setAssignStudents(stuItems);
+      setAssignTargetIds(clsItems.map((c) => c.id));
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载班级与学生名单失败');
     } finally {
@@ -703,8 +803,22 @@ export default function TeacherQuestionStudioTab() {
         </div>
       )}
       {err && (
-        <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-          {err}
+        <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-xs text-red-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+            <span>{err}</span>
+          </div>
+          {subTab === 'ai' && genMode === 'ai' && (
+            <button
+              type="button"
+              disabled={generating}
+              onClick={() => void handleGenerate('template')}
+              className="h-8 px-3 rounded-lg bg-white border border-red-300 hover:bg-red-100/60 text-red-800 font-medium inline-flex items-center gap-1.5 shrink-0"
+            >
+              <Zap className="w-3.5 h-3.5 text-amber-600" />
+              <span>改用会考标准模板立即生成</span>
+            </button>
+          )}
         </div>
       )}
 
@@ -716,9 +830,38 @@ export default function TeacherQuestionStudioTab() {
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <span className="text-sm font-bold text-slate-900">出题参数设置</span>
               <span className="text-xs font-medium text-teal-700 tabular-nums">
-                今日可用额度：
-                {quota.remaining ?? Math.max(0, quota.limit - quota.used)} / {quota.limit} 题
+                {genMode === 'template'
+                  ? '模板引擎 · 不消耗 AI 额度'
+                  : `今日可用额度：${quota.remaining ?? Math.max(0, quota.limit - quota.used)} / ${quota.limit} 题`}
               </span>
+            </div>
+
+            {/* Generation Mode Toggle */}
+            <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-slate-100 border border-slate-200">
+              <button
+                type="button"
+                onClick={() => setGenMode('ai')}
+                className={`h-8 px-2.5 rounded-lg font-medium flex items-center justify-center gap-1.5 transition-colors ${
+                  genMode === 'ai'
+                    ? 'bg-white text-sky-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>AI 大模型智能出题</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setGenMode('template')}
+                className={`h-8 px-2.5 rounded-lg font-medium flex items-center justify-center gap-1.5 transition-colors ${
+                  genMode === 'template'
+                    ? 'bg-white text-teal-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span>标准模板快速出题</span>
+              </button>
             </div>
 
             <div className="space-y-1.5">
@@ -945,19 +1088,35 @@ export default function TeacherQuestionStudioTab() {
 
             <button
               type="button"
-              disabled={generating || quota.remaining <= 0}
+              disabled={generating || (genMode === 'ai' && quota.remaining <= 0)}
               onClick={() => void handleGenerate()}
-              className="w-full h-10 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white rounded-xl font-medium flex items-center justify-center gap-2"
+              className={`w-full h-10 disabled:opacity-50 text-white rounded-xl font-medium flex items-center justify-center gap-2 transition-colors ${
+                genMode === 'template'
+                  ? 'bg-teal-600 hover:bg-teal-700'
+                  : 'bg-sky-600 hover:bg-sky-700'
+              }`}
             >
               {generating ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>正在生成题目与自动判分规则...</span>
+                  <span>
+                    {genMode === 'template'
+                      ? '正在组装会考标准操作题...'
+                      : '正在生成题目与自动判分规则...'}
+                  </span>
                 </>
               ) : (
                 <>
-                  <Sparkles className="w-4 h-4" />
-                  <span>立即生成并预览</span>
+                  {genMode === 'template' ? (
+                    <Zap className="w-4 h-4" />
+                  ) : (
+                    <Sparkles className="w-4 h-4" />
+                  )}
+                  <span>
+                    {genMode === 'template'
+                      ? '按标准模板立即生成并预览'
+                      : 'AI 立即生成并预览'}
+                  </span>
                 </>
               )}
             </button>
@@ -976,179 +1135,252 @@ export default function TeacherQuestionStudioTab() {
                 </p>
               </div>
             ) : (
-              previewList.map((q) => (
-                <div
-                  key={q.localId}
-                  className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4 text-xs"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-sky-700">
-                        {TYPE_LABELS[q.type]}
-                      </span>
-                      <span className="text-slate-300">|</span>
-                      <span className="text-slate-600">难度：{q.difficulty}</span>
-                      <span className="text-slate-300">|</span>
-                      <span className="text-slate-600 tabular-nums">
-                        满分：{q.totalScore} 分
-                      </span>
-                    </div>
+              previewList.map((q) => {
+                const steps = Array.isArray(q.steps) ? q.steps : [];
+                const kpsList = Array.isArray(q.knowledgePoints) ? q.knowledgePoints : [];
+                const analysisList = Array.isArray(q.analysis) ? q.analysis : [];
+                const mistakesList = Array.isArray(q.commonMistakes) ? q.commonMistakes : [];
+                const stepSum = steps.reduce((s, x) => s + Number(x.score || 0), 0);
+                const showAnalysis = expandedAnalysisIds.includes(q.localId);
 
-                    <select
-                      value={q.visibility}
-                      onChange={(e) =>
-                        setPreviewList((prev) =>
-                          prev.map((item) =>
-                            item.localId === q.localId
-                              ? {
-                                  ...item,
-                                  visibility: e.target.value as 'private' | 'shared',
-                                }
-                              : item
-                          )
-                        )
-                      }
-                      className="h-7 px-2 border border-slate-200 rounded-lg bg-slate-50 text-xs"
-                    >
-                      <option value="private">存为个人私有</option>
-                      <option value="shared">存入并共享给全校教师</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block space-y-1">
-                      <span className="text-slate-500 font-medium">题目标题</span>
-                      <input
-                        type="text"
-                        value={q.title}
-                        onChange={(e) =>
-                          setPreviewList((prev) =>
-                            prev.map((item) =>
-                              item.localId === q.localId
-                                ? { ...item, title: e.target.value }
-                                : item
-                            )
-                          )
-                        }
-                        className="w-full h-8 px-2.5 border border-slate-200 rounded-lg font-semibold text-slate-900 text-sm"
-                      />
-                    </label>
-
-                    <label className="block space-y-1">
-                      <span className="text-slate-500 font-medium">情境说明</span>
-                      <textarea
-                        rows={2}
-                        value={q.scenario}
-                        onChange={(e) =>
-                          setPreviewList((prev) =>
-                            prev.map((item) =>
-                              item.localId === q.localId
-                                ? { ...item, scenario: e.target.value }
-                                : item
-                            )
-                          )
-                        }
-                        className="w-full p-2 border border-slate-200 rounded-lg text-slate-700"
-                      />
-                    </label>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <div className="text-slate-500 font-medium">
-                      操作步骤（共 {q.steps.length} 步，可微调文字与分值）
-                    </div>
-                    {q.steps.map((st, sIdx) => (
-                      <div key={st.index} className="flex items-start gap-2">
-                        <span className="w-5 h-7 flex items-center justify-center font-mono text-slate-400">
-                          {sIdx + 1}.
+                return (
+                  <div
+                    key={q.localId}
+                    className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4 text-xs"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold text-sky-700">
+                          {TYPE_LABELS[q.type]}
                         </span>
+                        <span className="text-slate-300">|</span>
+                        <span className="text-slate-600">难度：{q.difficulty}</span>
+                        <span className="text-slate-300">|</span>
+                        <span className="text-slate-600 tabular-nums">
+                          步骤合计：{stepSum} 分
+                        </span>
+                      </div>
+
+                      <select
+                        value={q.visibility}
+                        onChange={(e) =>
+                          setPreviewList((prev) =>
+                            prev.map((item) =>
+                              item.localId === q.localId
+                                ? {
+                                    ...item,
+                                    visibility: e.target.value as 'private' | 'shared',
+                                  }
+                                : item
+                            )
+                          )
+                        }
+                        className="h-7 px-2 border border-slate-200 rounded-lg bg-slate-50 text-xs"
+                      >
+                        <option value="private">存为个人私有</option>
+                        <option value="shared">存入并共享给全校教师</option>
+                      </select>
+                    </div>
+
+                    {kpsList.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[11px] text-slate-400">考查考点：</span>
+                        {kpsList.map((kpName) => (
+                          <span
+                            key={kpName}
+                            className="px-2 py-0.5 rounded border border-slate-200 bg-slate-50 text-[11px] text-slate-700"
+                          >
+                            {kpName}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="space-y-2">
+                      <label className="block space-y-1">
+                        <span className="text-slate-500 font-medium">题目标题</span>
                         <input
                           type="text"
-                          value={st.instruction}
+                          value={q.title}
                           onChange={(e) =>
                             setPreviewList((prev) =>
-                              prev.map((item) => {
-                                if (item.localId !== q.localId) return item;
-                                const nextSteps = [...item.steps];
-                                nextSteps[sIdx] = {
-                                  ...nextSteps[sIdx],
-                                  instruction: e.target.value,
-                                };
-                                return { ...item, steps: nextSteps };
-                              })
+                              prev.map((item) =>
+                                item.localId === q.localId
+                                  ? { ...item, title: e.target.value }
+                                  : item
+                              )
                             )
                           }
-                          className="flex-1 h-7 px-2 border border-slate-200 rounded-lg text-slate-800"
+                          className="w-full h-8 px-2.5 border border-slate-200 rounded-lg font-semibold text-slate-900 text-sm"
                         />
-                        <input
-                          type="number"
-                          value={st.score}
-                          onChange={(e) =>
-                            setPreviewList((prev) =>
-                              prev.map((item) => {
-                                if (item.localId !== q.localId) return item;
-                                const nextSteps = [...item.steps];
-                                nextSteps[sIdx] = {
-                                  ...nextSteps[sIdx],
-                                  score: Number(e.target.value),
-                                };
-                                return { ...item, steps: nextSteps };
-                              })
-                            )
-                          }
-                          className="w-16 h-7 px-2 border border-slate-200 rounded-lg text-right tabular-nums"
-                        />
-                      </div>
-                    ))}
-                  </div>
+                      </label>
 
-                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => openTrial(q)}
-                        className="h-8 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg font-medium inline-flex items-center gap-1"
-                      >
-                        <Play className="w-3.5 h-3.5 text-sky-600" />
-                        <span>试做验证</span>
-                      </button>
-                      <button
-                        type="button"
-                        disabled={savingId === q.localId}
-                        onClick={() => void handleRegenerateOne(q.localId, q)}
-                        className="h-8 px-3 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg font-medium inline-flex items-center gap-1"
-                      >
-                        <RefreshCw
-                          className={`w-3.5 h-3.5 ${savingId === q.localId ? 'animate-spin' : ''}`}
+                      <label className="block space-y-1">
+                        <span className="text-slate-500 font-medium">情境说明</span>
+                        <textarea
+                          rows={2}
+                          value={q.scenario}
+                          onChange={(e) =>
+                            setPreviewList((prev) =>
+                              prev.map((item) =>
+                                item.localId === q.localId
+                                  ? { ...item, scenario: e.target.value }
+                                  : item
+                              )
+                            )
+                          }
+                          className="w-full p-2 border border-slate-200 rounded-lg text-slate-700"
                         />
-                        <span>重新生成</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setPreviewList((prev) =>
-                            prev.filter((item) => item.localId !== q.localId)
-                          )
-                        }
-                        className="h-8 px-2.5 text-red-600 hover:bg-red-50 rounded-lg inline-flex items-center gap-1"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>舍弃</span>
-                      </button>
+                      </label>
                     </div>
 
-                    <button
-                      type="button"
-                      disabled={savingId === q.localId}
-                      onClick={() => void handleSaveToBank(q)}
-                      className="h-8 px-4 bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white rounded-lg font-medium inline-flex items-center gap-1.5"
-                    >
-                      <Save className="w-3.5 h-3.5" />
-                      <span>存入题库</span>
-                    </button>
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500 font-medium">
+                          操作步骤（共 {steps.length} 步，可微调文字与分值）
+                        </span>
+                        {stepSum !== q.totalScore && (
+                          <span className="text-[11px] text-amber-700">
+                            分值已修改，入库时将自动按 {stepSum} 分保存
+                          </span>
+                        )}
+                      </div>
+                      {steps.map((st, sIdx) => (
+                        <div key={st.index ?? sIdx} className="flex items-start gap-2">
+                          <span className="w-5 h-7 flex items-center justify-center font-mono text-slate-400">
+                            {sIdx + 1}.
+                          </span>
+                          <input
+                            type="text"
+                            value={st.instruction}
+                            onChange={(e) =>
+                              setPreviewList((prev) =>
+                                prev.map((item) => {
+                                  if (item.localId !== q.localId) return item;
+                                  const nextSteps = [...(item.steps || [])];
+                                  nextSteps[sIdx] = {
+                                    ...nextSteps[sIdx],
+                                    instruction: e.target.value,
+                                  };
+                                  return { ...item, steps: nextSteps };
+                                })
+                              )
+                            }
+                            className="flex-1 h-7 px-2 border border-slate-200 rounded-lg text-slate-800"
+                          />
+                          <input
+                            type="number"
+                            value={st.score}
+                            onChange={(e) =>
+                              setPreviewList((prev) =>
+                                prev.map((item) => {
+                                  if (item.localId !== q.localId) return item;
+                                  const nextSteps = [...(item.steps || [])];
+                                  nextSteps[sIdx] = {
+                                    ...nextSteps[sIdx],
+                                    score: Number(e.target.value),
+                                  };
+                                  return { ...item, steps: nextSteps };
+                                })
+                              )
+                            }
+                            className="w-16 h-7 px-2 border border-slate-200 rounded-lg text-right tabular-nums"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    {(analysisList.length > 0 || mistakesList.length > 0) && (
+                      <div className="border border-slate-200 rounded-xl bg-slate-50/60 p-3 space-y-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedAnalysisIds((prev) =>
+                              prev.includes(q.localId)
+                                ? prev.filter((id) => id !== q.localId)
+                                : [...prev, q.localId]
+                            )
+                          }
+                          className="text-[11px] font-medium text-sky-700 hover:underline"
+                        >
+                          {showAnalysis
+                            ? '收起参考解析与易错点'
+                            : `查看参考解析与常见易错点（${analysisList.length} 条）`}
+                        </button>
+                        {showAnalysis && (
+                          <div className="space-y-1.5 text-[11px] text-slate-700 pt-1 border-t border-slate-200">
+                            {analysisList.map((a, idx) => (
+                              <div key={idx}>• {a}</div>
+                            ))}
+                            {mistakesList.length > 0 && (
+                              <div className="text-amber-800 pt-1">
+                                易错提醒：{mistakesList.join('；')}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openTrial(q)}
+                          className="h-8 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg font-medium inline-flex items-center gap-1"
+                        >
+                          <Play className="w-3.5 h-3.5 text-sky-600" />
+                          <span>试做验证</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={savingId === q.localId}
+                          onClick={() => void handleRegenerateOne(q.localId, q)}
+                          className="h-8 px-3 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg font-medium inline-flex items-center gap-1"
+                        >
+                          <RefreshCw
+                            className={`w-3.5 h-3.5 ${savingId === q.localId ? 'animate-spin' : ''}`}
+                          />
+                          <span>重新生成</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPreviewList((prev) =>
+                              prev.filter((item) => item.localId !== q.localId)
+                            )
+                          }
+                          className="h-8 px-2.5 text-red-600 hover:bg-red-50 rounded-lg inline-flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>舍弃</span>
+                        </button>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={savingId === q.localId}
+                          onClick={() => void savePreviewQuestion(q, false)}
+                          className="h-8 px-3.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white rounded-lg font-medium inline-flex items-center gap-1.5"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                          <span>存入题库</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={savingId === q.localId}
+                          onClick={() => void savePreviewQuestion(q, true)}
+                          className="h-8 px-3.5 bg-sky-600 hover:bg-sky-700 disabled:opacity-60 text-white rounded-lg font-medium inline-flex items-center gap-1.5"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          <span>入库并分配给学生</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>

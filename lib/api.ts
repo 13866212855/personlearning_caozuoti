@@ -81,7 +81,7 @@ function getDefaultTimeoutMs(url: string): number {
     url.includes('/regenerate') ||
     url.includes('/llm-config/test')
   ) {
-    return 95000;
+    return 120000;
   }
   return 15000;
 }
@@ -146,12 +146,24 @@ export async function portalFetch<T>(
     headers.Authorization = `Bearer ${token}`;
   }
   const resp = await fetchWithTimeout(url, { ...options, headers });
-  const data = await resp.json().catch(() => ({}));
+  const rawText = await resp.text().catch(() => '');
+  let data: Record<string, unknown> = {};
+  if (rawText) {
+    try {
+      data = JSON.parse(rawText) as Record<string, unknown>;
+    } catch {
+      if (resp.ok) {
+        throw new Error('服务器返回了非 JSON 格式响应，请刷新页面或联系管理员');
+      }
+    }
+  }
   if (!resp.ok) {
     if (resp.status === 401) {
       clearPortalToken();
     }
-    throw new Error(data.error || `请求失败 (${resp.status})`);
+    throw new Error(
+      (typeof data.error === 'string' && data.error) || `请求失败 (${resp.status})`
+    );
   }
   return data as T;
 }
@@ -171,12 +183,24 @@ export async function adminFetch<T>(
     headers.Authorization = `Bearer ${token}`;
   }
   const resp = await fetchWithTimeout(url, { ...options, headers });
-  const data = await resp.json().catch(() => ({}));
+  const rawText = await resp.text().catch(() => '');
+  let data: Record<string, unknown> = {};
+  if (rawText) {
+    try {
+      data = JSON.parse(rawText) as Record<string, unknown>;
+    } catch {
+      if (resp.ok) {
+        throw new Error('服务器返回了非 JSON 格式响应，请刷新页面或联系管理员');
+      }
+    }
+  }
   if (!resp.ok) {
     if (resp.status === 401) {
       clearAdminToken();
     }
-    throw new Error(data.error || `请求失败 (${resp.status})`);
+    throw new Error(
+      (typeof data.error === 'string' && data.error) || `请求失败 (${resp.status})`
+    );
   }
   return data as T;
 }

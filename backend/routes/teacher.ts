@@ -23,6 +23,7 @@ import {
   getTeacherTodayAiUsage,
   recordAiGenerationUsage,
 } from '../services/llm';
+import { generateQuestionFromTemplate } from '../utils/templateQuestionGenerator';
 import type {
   DifficultyLevel,
   ExamQuestionResult,
@@ -754,6 +755,7 @@ router.post('/knowledge-points', (req: AuthedRequest, res) => {
 
 router.post('/questions/ai-generate', async (req: AuthedRequest, res) => {
   const schema = z.object({
+    mode: z.enum(['ai', 'template']).default('ai'),
     type: z.enum(['word', 'excel', 'web', 'file', 'python', 'database']),
     difficulty: z.enum(['基础', '中等', '提高']).default('中等'),
     count: z.number().int().min(1).max(5).default(1),
@@ -770,51 +772,77 @@ router.post('/questions/ai-generate', async (req: AuthedRequest, res) => {
     return;
   }
 
-  const quota = getTeacherTodayAiUsage(req.teacher!.id);
-  if (quota.used + parsed.data.count > quota.limit) {
-    res.status(429).json({
-      error: `今日 AI 生成题目额度已用尽（已生成 ${quota.used}/${quota.limit} 题），请联系超级管理员调整限额`,
-    });
-    return;
-  }
-
-  const generated = [];
-  const errors: string[] = [];
-
-  for (let i = 0; i < parsed.data.count; i++) {
-    try {
-      const q = await generateQuestionWithAi({
-        type: parsed.data.type,
-        difficulty: parsed.data.difficulty,
-        knowledgePoints: parsed.data.knowledgePoints,
-        knowledgePointIds: parsed.data.knowledgePointIds,
-        customPrompt: parsed.data.customPrompt,
-        stepCount: parsed.data.stepCount,
-        totalScore: parsed.data.totalScore,
-        needsImage: parsed.data.needsImage,
-        status: 'published',
-        ownerId: req.teacher!.id,
-        visibility: 'private',
+  try {
+    const quota = getTeacherTodayAiUsage(req.teacher!.id);
+    if (
+      parsed.data.mode === 'ai' &&
+      quota.used + parsed.data.count > quota.limit
+    ) {
+      res.status(429).json({
+        error: `今日 AI 生成题目额度已用尽（已生成 ${quota.used}/${quota.limit} 题），可先切换为「会考标准模板快速出题」或联系管理员调整限额`,
       });
-      recordAiGenerationUsage(req.teacher!.id, 'teacher', 1);
-      generated.push(q);
-    } catch (err) {
-      errors.push(err instanceof Error ? err.message : '生成失败');
+      return;
     }
-  }
 
-  if (generated.length === 0) {
-    res.status(502).json({
-      error: errors[0] || 'AI 生成题目失败，请调整知识点或重试',
+    const generated = [];
+    const errors: string[] = [];
+
+    for (let i = 0; i < parsed.data.count; i++) {
+      try {
+        if (parsed.data.mode === 'template') {
+          const q = generateQuestionFromTemplate({
+            type: parsed.data.type,
+            difficulty: parsed.data.difficulty,
+            knowledgePoints: parsed.data.knowledgePoints,
+            knowledgePointIds: parsed.data.knowledgePointIds,
+            customPrompt: parsed.data.customPrompt,
+            stepCount: parsed.data.stepCount,
+            totalScore: parsed.data.totalScore,
+            needsImage: parsed.data.needsImage,
+            ownerId: req.teacher!.id,
+            visibility: 'private',
+            variantIndex: i,
+          });
+          generated.push(q);
+        } else {
+          const q = await generateQuestionWithAi({
+            type: parsed.data.type,
+            difficulty: parsed.data.difficulty,
+            knowledgePoints: parsed.data.knowledgePoints,
+            knowledgePointIds: parsed.data.knowledgePointIds,
+            customPrompt: parsed.data.customPrompt,
+            stepCount: parsed.data.stepCount,
+            totalScore: parsed.data.totalScore,
+            needsImage: parsed.data.needsImage,
+            status: 'published',
+            ownerId: req.teacher!.id,
+            visibility: 'private',
+          });
+          recordAiGenerationUsage(req.teacher!.id, 'teacher', 1);
+          generated.push(q);
+        }
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : '生成失败');
+      }
+    }
+
+    if (generated.length === 0) {
+      res.status(502).json({
+        error: errors[0] || 'AI 生成题目失败，请调整知识点或改用会考标准模板出题',
+      });
+      return;
+    }
+
+    res.json({
+      questions: generated,
+      errors,
+      quota: getTeacherTodayAiUsage(req.teacher!.id),
     });
-    return;
+  } catch (err) {
+    res.status(500).json({
+      error: err instanceof Error ? err.message : '出题服务异常，请稍后重试',
+    });
   }
-
-  res.json({
-    questions: generated,
-    errors,
-    quota: getTeacherTodayAiUsage(req.teacher!.id),
-  });
 });
 
 // Teacher "试做" simulator verification

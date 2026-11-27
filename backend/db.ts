@@ -441,6 +441,13 @@ function initializeDefaults(db: Database.Database) {
       APP_CONFIG.defaultLlm.timeoutMs,
       now
     );
+  } else {
+    db.prepare(
+      `UPDATE llm_configs SET text_model = 'agnes-2.5-flash' WHERE id = 1 AND text_model = 'Agnes-2.5-flash'`
+    ).run();
+    db.prepare(
+      `UPDATE llm_configs SET image_model = 'agnes-image-2.1-flash' WHERE id = 1 AND image_model = 'Agnes-Image-2.1-flash'`
+    ).run();
   }
 
   // 2. Ensure default super_admin, teacher, default class, and demo student exist

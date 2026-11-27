@@ -228,6 +228,7 @@ export default function AdminLlmConfigTab() {
               required
               value={textModel}
               onChange={(e) => setTextModel(e.target.value)}
+              placeholder="agnes-2.5-flash"
               className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm font-mono"
             />
           </div>
@@ -240,6 +241,7 @@ export default function AdminLlmConfigTab() {
               required
               value={imageModel}
               onChange={(e) => setImageModel(e.target.value)}
+              placeholder="agnes-image-2.1-flash"
               className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm font-mono"
             />
           </div>

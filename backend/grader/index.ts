@@ -112,7 +112,9 @@ function gradeWordCheckpoint(
 
     case 'word_text_not_contains': {
       const forbidden = String(p.text || '').trim();
-      const allText = (state.paragraphs || []).map((x) => x.text).join('\n');
+      const allText = (Array.isArray(state?.paragraphs) ? state.paragraphs : [])
+        .map((x) => String(x?.text || ''))
+        .join('\n');
       passed = !allText.includes(forbidden);
       feedback = passed
         ? `已成功替换/移除文本「${forbidden}」。`
@@ -121,11 +123,12 @@ function gradeWordCheckpoint(
     }
 
     case 'word_table_exists': {
-      const tables = state.tables || [];
+      const tables = Array.isArray(state?.tables) ? state.tables : [];
       const minRows = Number(p.minRows || 1);
       const minCols = Number(p.minCols || 1);
       const matchedTable = tables.find(
         (t) =>
+          Array.isArray(t?.rows) &&
           t.rows.length >= minRows &&
           (t.rows[0]?.length || 0) >= minCols
       );
@@ -542,17 +545,21 @@ function gradeWebCheckpoint(
   state: WebState
 ): CheckpointResult {
   const p = cp.params || {};
-  const files = state.files || [];
+  const files = Array.isArray(state?.files) ? state.files : [];
   let passed = false;
   let feedback = '';
 
   const getFile = (name?: unknown) => {
     if (typeof name === 'string') {
       return files.find(
-        (f) => f.path === name || f.name === name || f.path.endsWith(`/${name}`)
+        (f) =>
+          f &&
+          (f.path === name ||
+            f.name === name ||
+            String(f.path || '').endsWith(`/${name}`))
       );
     }
-    return files.find((f) => f.type === 'html') || files[0];
+    return files.find((f) => f?.type === 'html') || files[0];
   };
 
   switch (cp.ruleType) {
@@ -682,14 +689,16 @@ function gradeFileCheckpoint(
   state: FileState
 ): CheckpointResult {
   const p = cp.params || {};
-  const items = state.items || [];
+  const items = Array.isArray(state?.items) ? state.items : [];
   const targetPath = normalizePath(String(p.path || ''));
   let passed = false;
   let feedback = '';
 
   switch (cp.ruleType) {
     case 'file_exists': {
-      const found = items.find((item) => normalizePath(item.path) === targetPath);
+      const found = items.find(
+        (item) => item && normalizePath(String(item.path || '')) === targetPath
+      );
       if (!found) {
         feedback = `路径「${p.path}」不存在。`;
         break;
@@ -919,8 +928,12 @@ function gradeDatabaseCheckpoint(
         ? (p.expectedRows as Array<Array<string | number | null>>)
         : null;
       if (expectedRows) {
-        const normExpected = expectedRows.map((r) => r.map(normalizeSqlCell));
-        const normActual = execRes.rows.map((r) => r.map(normalizeSqlCell));
+        const normExpected = expectedRows.map((r) =>
+          (Array.isArray(r) ? r : [r]).map(normalizeSqlCell)
+        );
+        const normActual = (execRes.rows || []).map((r) =>
+          (Array.isArray(r) ? r : [r]).map(normalizeSqlCell)
+        );
         const ignoreOrder = Boolean(p.ignoreOrder);
         const rowKey = (r: string[]) => r.join('||');
         let rowsOk = normExpected.length === normActual.length;
@@ -969,13 +982,18 @@ function gradeDatabaseCheckpoint(
         ? (p.rowContains as Array<Array<string | number | null>>)
         : [];
       const rowKeys = new Set(
-        targetTable.rows.map((r) => r.map(normalizeSqlCell).join('||'))
+        (targetTable.rows || []).map((r) =>
+          (Array.isArray(r) ? r : [r]).map(normalizeSqlCell).join('||')
+        )
       );
       const missingRow = rowChecks.find(
-        (rc) => !rowKeys.has(rc.map(normalizeSqlCell).join('||'))
+        (rc) =>
+          !rowKeys.has(
+            (Array.isArray(rc) ? rc : [rc]).map(normalizeSqlCell).join('||')
+          )
       );
       if (missingRow) {
-        feedback = `数据表「${targetTable.name}」中未检测到目标记录 [${missingRow.join(', ')}]。`;
+        feedback = `数据表「${targetTable.name}」中未检测到目标记录 [${(Array.isArray(missingRow) ? missingRow : [missingRow]).join(', ')}]。`;
         break;
       }
 
@@ -983,7 +1001,9 @@ function gradeDatabaseCheckpoint(
         ? (p.rowNotContains as Array<Array<string | number | null>>)
         : [];
       const stillPresent = notContains.find((rc) =>
-        rowKeys.has(rc.map(normalizeSqlCell).join('||'))
+        rowKeys.has(
+          (Array.isArray(rc) ? rc : [rc]).map(normalizeSqlCell).join('||')
+        )
       );
       if (stillPresent) {
         feedback = `数据表「${targetTable.name}」中仍存在应被删除或修改的记录 [${stillPresent.join(', ')}]。`;

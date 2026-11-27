@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { jsonrepair } from 'jsonrepair';
 import { z } from 'zod';
 import { APP_CONFIG } from '../config';
 import { getDb } from '../db';
@@ -87,6 +88,47 @@ function extractJsonBlock(raw: string): string {
   return trimmed;
 }
 
+export function parseLlmJson(raw: string): Record<string, unknown> {
+  const candidate = extractJsonBlock(raw);
+  const attempts: Array<() => unknown> = [
+    () => JSON.parse(candidate),
+    () => JSON.parse(jsonrepair(candidate)),
+    () => {
+      const cleaned = raw
+        .trim()
+        .replace(/^```(?:json)?/i, '')
+        .replace(/```$/i, '')
+        .trim();
+      return JSON.parse(jsonrepair(cleaned));
+    },
+  ];
+
+  let lastErr: unknown;
+  for (const attempt of attempts) {
+    try {
+      let parsed = attempt();
+      if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === 'object') {
+        parsed = parsed[0];
+      }
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const obj = parsed as Record<string, unknown>;
+        if (
+          obj.question &&
+          typeof obj.question === 'object' &&
+          !Array.isArray(obj.question) &&
+          !obj.steps
+        ) {
+          return obj.question as Record<string, unknown>;
+        }
+        return obj;
+      }
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('模型输出不是合法 JSON 格式');
+}
+
 const StepSchema = z.object({
   index: z.number().int().min(1),
   instruction: z.string().min(3),
@@ -145,38 +187,71 @@ async function fetchWithTimeout(
 
 export async function callChatCompletions(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
-  cfgOverride?: Partial<LlmConfigRow>
+  cfgOverride?: Partial<LlmConfigRow>,
+  options?: { jsonMode?: boolean }
 ): Promise<{ text: string; latencyMs: number }> {
   const dbCfg = getLlmConfig();
   const baseUrl = (cfgOverride?.base_url || dbCfg.base_url).replace(/\/+$/, '');
   const apiKey = cfgOverride?.api_key || dbCfg.api_key;
   const model = cfgOverride?.text_model || dbCfg.text_model;
   const temperature = cfgOverride?.temperature ?? dbCfg.temperature;
-  const maxTokens = cfgOverride?.max_tokens ?? dbCfg.max_tokens;
-  const timeoutMs = cfgOverride?.timeout_ms ?? dbCfg.timeout_ms;
+  const maxTokens = options?.jsonMode
+    ? Math.max(cfgOverride?.max_tokens ?? dbCfg.max_tokens ?? 4096, 4096)
+    : (cfgOverride?.max_tokens ?? dbCfg.max_tokens);
+  const timeoutMs = Math.min(
+    Math.max(cfgOverride?.timeout_ms ?? dbCfg.timeout_ms ?? 35000, 8000),
+    40000
+  );
+
+  const sendRequest = async (withJsonFormat: boolean) => {
+    const payload: Record<string, unknown> = {
+      model,
+      messages,
+      temperature,
+      max_tokens: maxTokens,
+    };
+    if (withJsonFormat) {
+      payload.response_format = { type: 'json_object' };
+    }
+    return fetchWithTimeout(
+      `${baseUrl}/chat/completions`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(payload),
+      },
+      timeoutMs
+    );
+  };
 
   const started = Date.now();
-  const resp = await fetchWithTimeout(
-    `${baseUrl}/chat/completions`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        temperature,
-        max_tokens: maxTokens,
-      }),
-    },
-    timeoutMs
-  );
+  let resp = await sendRequest(Boolean(options?.jsonMode));
+  if (options?.jsonMode && (resp.status === 400 || resp.status === 422)) {
+    // Some OpenAI-compatible gateways reject response_format; retry cleanly without it
+    resp = await sendRequest(false);
+  }
 
   const latencyMs = Date.now() - started;
   if (!resp.ok) {
     const errText = await resp.text().catch(() => '');
+    if (resp.status === 401 || resp.status === 403) {
+      throw new Error(
+        `NON_RETRYABLE:大模型接口鉴权或账号受限（HTTP ${resp.status}），请联系管理员在「后台管理 -> 大模型配置」更换可用接口，或先切换为「会考标准模板快速出题」。`
+      );
+    }
+    if (resp.status === 404) {
+      throw new Error(
+        `NON_RETRYABLE:大模型接口地址或模型名称无效（HTTP 404），请检查后台大模型配置。`
+      );
+    }
+    if (resp.status === 429) {
+      throw new Error(
+        `NON_RETRYABLE:大模型接口请求过于频繁或额度不足（HTTP 429），请稍后再试或切换为「会考标准模板快速出题」。`
+      );
+    }
     throw new Error(
       `HTTP ${resp.status} ${resp.statusText}: ${errText.slice(0, 300)}`
     );
@@ -407,8 +482,111 @@ initialState 与 referenceAnswer 的 JSON 结构必须严格为：
 4. referenceAnswer 必须与 initialState 同结构，且必须 100% 通过你给出的所有 checkpoints 判分规则。
 5. ${typeSpecs[type]}
 6. ${imageLine}
-7. 必须只输出一个合法 JSON 对象，不要输出任何额外说明或 markdown 以外的内容。JSON 顶层字段为：
+7. 必须只输出一个严格合法的 JSON 对象（不要任何额外说明、注释或尾逗号；字符串内部如包含双引号请务必使用反斜杠 \\" 转义或改用单引号/书名号，禁止裸换行符）。JSON 顶层字段为：
 title, knowledgePoints, scenario, totalScore(${totalScore}), materials({description, initialState}), steps([{index, instruction, score, hint}]), checkpoints([{id, stepIndex, description, score, ruleType, params}]), referenceAnswer, analysis([string]), commonMistakes([string]), needsImagePrompt。`;
+}
+
+function normalizeRawGeneratedQuestion(
+  raw: Record<string, unknown>,
+  fallbackKps: string[] | undefined,
+  requestedTotalScore: number
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...raw };
+  out.title = String(out.title || '信息技术操作综合练习题').trim();
+  out.scenario = String(
+    out.scenario || '请根据操作任务要求完成以下信息技术应用处理。'
+  ).trim();
+
+  const rawKps = Array.isArray(out.knowledgePoints)
+    ? out.knowledgePoints.map((k) => String(k).trim()).filter(Boolean)
+    : [];
+  out.knowledgePoints =
+    rawKps.length > 0
+      ? rawKps
+      : fallbackKps && fallbackKps.length > 0
+        ? fallbackKps
+        : ['信息技术综合操作'];
+
+  const totalScoreNum = Number(out.totalScore);
+  out.totalScore =
+    Number.isFinite(totalScoreNum) && totalScoreNum > 0
+      ? totalScoreNum
+      : requestedTotalScore || 100;
+
+  const rawSteps = Array.isArray(out.steps) ? out.steps : [];
+  out.steps = rawSteps.map((s, idx) => {
+    const rec = s && typeof s === 'object' ? (s as Record<string, unknown>) : {};
+    const stepScore = Number(rec.score);
+    return {
+      index: Math.max(1, Math.round(Number(rec.index) || idx + 1)),
+      instruction: String(
+        rec.instruction || rec.description || rec.title || `完成第 ${idx + 1} 步操作`
+      ),
+      score: Number.isFinite(stepScore) && stepScore > 0 ? stepScore : 20,
+      hint: rec.hint ? String(rec.hint) : undefined,
+    };
+  });
+
+  const rawCps = Array.isArray(out.checkpoints) ? out.checkpoints : [];
+  out.checkpoints = rawCps.map((c, idx) => {
+    const rec = c && typeof c === 'object' ? (c as Record<string, unknown>) : {};
+    const cpScore = Number(rec.score);
+    return {
+      id: String(rec.id || `cp-${idx + 1}`),
+      stepIndex: Math.max(1, Math.round(Number(rec.stepIndex) || idx + 1)),
+      description: String(rec.description || `检查点 ${idx + 1}`),
+      score: Number.isFinite(cpScore) && cpScore > 0 ? cpScore : 20,
+      ruleType: String(rec.ruleType || ''),
+      params:
+        rec.params && typeof rec.params === 'object' && !Array.isArray(rec.params)
+          ? rec.params
+          : {},
+    };
+  });
+
+  const rawMats =
+    out.materials && typeof out.materials === 'object' && !Array.isArray(out.materials)
+      ? (out.materials as Record<string, unknown>)
+      : {};
+  out.materials = {
+    description: String(rawMats.description || '题目初始操作环境'),
+    assets: Array.isArray(rawMats.assets) ? rawMats.assets : undefined,
+    initialState:
+      rawMats.initialState &&
+      typeof rawMats.initialState === 'object' &&
+      !Array.isArray(rawMats.initialState)
+        ? rawMats.initialState
+        : {},
+  };
+
+  if (
+    !out.referenceAnswer ||
+    typeof out.referenceAnswer !== 'object' ||
+    Array.isArray(out.referenceAnswer)
+  ) {
+    out.referenceAnswer = {};
+  }
+
+  if (typeof out.analysis === 'string') {
+    out.analysis = out.analysis.trim() ? [out.analysis.trim()] : ['按步骤依次完成操作并核对细节。'];
+  } else if (!Array.isArray(out.analysis) || out.analysis.length === 0) {
+    out.analysis = ['按步骤依次完成操作并核对细节。'];
+  } else {
+    out.analysis = out.analysis.map((a) => String(a).trim()).filter(Boolean);
+    if ((out.analysis as string[]).length === 0) {
+      out.analysis = ['按步骤依次完成操作并核对细节。'];
+    }
+  }
+
+  if (typeof out.commonMistakes === 'string') {
+    out.commonMistakes = out.commonMistakes.trim() ? [out.commonMistakes.trim()] : [];
+  } else if (Array.isArray(out.commonMistakes)) {
+    out.commonMistakes = out.commonMistakes.map((m) => String(m).trim()).filter(Boolean);
+  } else {
+    out.commonMistakes = [];
+  }
+
+  return out;
 }
 
 export async function generateQuestionWithAi(params: {
@@ -445,22 +623,30 @@ export async function generateQuestionWithAi(params: {
   let lastError = '生成失败';
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      const { text } = await callChatCompletions([
-        {
-          role: 'system',
-          content:
-            '你是高中信息技术会考命题系统后端生成器，只输出严格合法的 JSON 对象。',
-        },
-        {
-          role: 'user',
-          content:
-            attempt === 1
-              ? prompt
-              : `${prompt}\n\n上次生成校验失败（${lastError}），请修正 JSON 结构和 referenceAnswer 确保所有 checkpoints 全部通过！`,
-        },
-      ]);
+      const { text } = await callChatCompletions(
+        [
+          {
+            role: 'system',
+            content:
+              '你是高中信息技术会考命题系统后端生成器，只输出严格合法的 JSON 对象，字符串内的引号与换行务必正确转义。',
+          },
+          {
+            role: 'user',
+            content:
+              attempt === 1
+                ? prompt
+                : `${prompt}\n\n上次生成校验失败（${lastError}），请修正 JSON 格式（确保双引号转义正确）和 referenceAnswer 确保所有 checkpoints 全部通过！`,
+          },
+        ],
+        undefined,
+        { jsonMode: true }
+      );
 
-      const rawJson = JSON.parse(extractJsonBlock(text));
+      const rawJson = normalizeRawGeneratedQuestion(
+        parseLlmJson(text),
+        kps,
+        params.totalScore || 100
+      );
       const parsed = GeneratedQuestionSchema.parse(rawJson);
 
       const sumScore = parsed.checkpoints.reduce((s, c) => s + c.score, 0);
@@ -503,19 +689,61 @@ export async function generateQuestionWithAi(params: {
 
       const finalMaterials = JSON.parse(materialsJsonStr);
       if (generatedImageUrl) {
-        finalMaterials.assets = finalMaterials.assets || [];
+        finalMaterials.assets = Array.isArray(finalMaterials.assets)
+          ? finalMaterials.assets
+          : [];
         finalMaterials.assets.push({
           name: '题目配图素材',
           url: generatedImageUrl,
           note: 'AI 生成题目素材图片',
         });
       }
-      const finalRefAnswer = JSON.parse(refAnswerJsonStr);
+      const rawRefAnswer = JSON.parse(refAnswerJsonStr);
+      const ensureState = (raw: Record<string, unknown>) => {
+        const s = raw && typeof raw === 'object' ? { ...raw } : {};
+        if (params.type === 'word') {
+          if (!Array.isArray(s.paragraphs)) s.paragraphs = [];
+          if (!Array.isArray(s.tables)) s.tables = [];
+          if (!Array.isArray(s.images)) s.images = [];
+          if (typeof s.headerText !== 'string') s.headerText = '';
+          if (typeof s.footerText !== 'string') s.footerText = '';
+          if (!s.pageSetup || typeof s.pageSetup !== 'object') {
+            s.pageSetup = {
+              orientation: 'portrait',
+              marginTop: 2.54,
+              marginBottom: 2.54,
+              marginLeft: 3.18,
+              marginRight: 3.18,
+            };
+          }
+        } else if (params.type === 'excel') {
+          if (!s.cells || typeof s.cells !== 'object') s.cells = {};
+          if (!Array.isArray(s.merges)) s.merges = [];
+          if (!Array.isArray(s.charts)) s.charts = [];
+        } else if (params.type === 'web') {
+          if (!Array.isArray(s.files)) s.files = [];
+        } else if (params.type === 'file') {
+          if (!Array.isArray(s.items)) s.items = [];
+        } else if (params.type === 'python') {
+          s.code = String(s.code || '');
+          s.customInput = String(s.customInput || '');
+          s.lastOutput = String(s.lastOutput || '');
+          s.lastError = String(s.lastError || '');
+        } else if (params.type === 'database') {
+          if (!Array.isArray(s.tables)) s.tables = [];
+          s.sql = String(s.sql || '');
+        }
+        return s;
+      };
+      finalMaterials.initialState = ensureState(
+        (finalMaterials.initialState as Record<string, unknown>) || {}
+      );
+      const finalRefAnswer = ensureState(rawRefAnswer);
 
       const selfCheck = gradeAnswerDeterministic(
         params.type,
         parsed.checkpoints,
-        finalRefAnswer
+        finalRefAnswer as never
       );
 
       if (selfCheck.autoScore < selfCheck.maxScore) {
@@ -540,7 +768,7 @@ export async function generateQuestionWithAi(params: {
         materials: finalMaterials,
         steps: parsed.steps,
         checkpoints: parsed.checkpoints,
-        referenceAnswer: finalRefAnswer,
+        referenceAnswer: finalRefAnswer as never,
         analysis: parsed.analysis,
         commonMistakes: parsed.commonMistakes,
         status: params.status || 'published',
@@ -553,7 +781,11 @@ export async function generateQuestionWithAi(params: {
 
       return question;
     } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
+      const rawMsg = err instanceof Error ? err.message : String(err);
+      if (rawMsg.startsWith('NON_RETRYABLE:')) {
+        throw new Error(rawMsg.replace(/^NON_RETRYABLE:/, ''));
+      }
+      lastError = rawMsg;
     }
   }
 
@@ -580,11 +812,23 @@ export async function regenerateQuestionAnswer(
   let lastErr = '';
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      const { text } = await callChatCompletions([
-        { role: 'system', content: '只输出合法 JSON 对象。' },
-        { role: 'user', content: prompt },
-      ]);
-      const parsed = JSON.parse(extractJsonBlock(text));
+      const { text } = await callChatCompletions(
+        [
+          { role: 'system', content: '只输出合法 JSON 对象。' },
+          { role: 'user', content: prompt },
+        ],
+        undefined,
+        { jsonMode: true }
+      );
+      const parsed = parseLlmJson(text) as {
+        referenceAnswer?: Question['referenceAnswer'];
+        analysis?: unknown;
+        commonMistakes?: unknown;
+      };
+      if (!parsed.referenceAnswer || typeof parsed.referenceAnswer !== 'object') {
+        lastErr = '返回缺少 referenceAnswer 对象';
+        continue;
+      }
       const check = gradeAnswerDeterministic(
         question.type,
         question.checkpoints,

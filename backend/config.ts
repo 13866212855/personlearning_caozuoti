@@ -34,8 +34,8 @@ export const APP_CONFIG = {
     apiKey:
       process.env.LLM_API_KEY ||
       'sk-vWM7RHG5n7bljBNi3GgHfygxqiKlUYrPWZLLSUByIGm4BiM9',
-    textModel: process.env.LLM_TEXT_MODEL || 'Agnes-2.5-flash',
-    imageModel: process.env.LLM_IMAGE_MODEL || 'Agnes-Image-2.1-flash',
+    textModel: process.env.LLM_TEXT_MODEL || 'agnes-2.5-flash',
+    imageModel: process.env.LLM_IMAGE_MODEL || 'agnes-image-2.1-flash',
     temperature: 0.4,
     maxTokens: 4096,
     timeoutMs: 45000,
