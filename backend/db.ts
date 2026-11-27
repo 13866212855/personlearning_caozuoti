@@ -237,6 +237,35 @@ function runSchemaAndMigrations(db: Database.Database) {
     );
   }
 
+  // 平台对接：成员镜像与班级映射（只增列，不动现有数据）
+  if (!hasColumn(db, 'users', 'platform_user_id')) {
+    db.exec('ALTER TABLE users ADD COLUMN platform_user_id INTEGER');
+  }
+  if (!hasColumn(db, 'users', 'platform_username')) {
+    db.exec("ALTER TABLE users ADD COLUMN platform_username TEXT NOT NULL DEFAULT ''");
+  }
+  if (!hasColumn(db, 'users', 'platform_role')) {
+    db.exec("ALTER TABLE users ADD COLUMN platform_role TEXT NOT NULL DEFAULT ''");
+  }
+  if (!hasColumn(db, 'users', 'platform_class_id')) {
+    db.exec('ALTER TABLE users ADD COLUMN platform_class_id INTEGER');
+  }
+  if (!hasColumn(db, 'users', 'platform_status')) {
+    db.exec("ALTER TABLE users ADD COLUMN platform_status TEXT NOT NULL DEFAULT ''");
+  }
+  if (!hasColumn(db, 'users', 'platform_synced_at')) {
+    db.exec("ALTER TABLE users ADD COLUMN platform_synced_at TEXT NOT NULL DEFAULT ''");
+  }
+  if (!hasColumn(db, 'users', 'last_login_at')) {
+    db.exec("ALTER TABLE users ADD COLUMN last_login_at TEXT NOT NULL DEFAULT ''");
+  }
+  if (!hasColumn(db, 'classes', 'platform_class_id')) {
+    db.exec('ALTER TABLE classes ADD COLUMN platform_class_id INTEGER');
+  }
+  if (!hasColumn(db, 'classes', 'platform_synced_at')) {
+    db.exec("ALTER TABLE classes ADD COLUMN platform_synced_at TEXT NOT NULL DEFAULT ''");
+  }
+
   // Non-destructive migration for old exams table -> legacy_exams
   if (tableExists(db, 'exams') && !hasColumn(db, 'exams', 'teacher_id')) {
     if (!tableExists(db, 'legacy_exams')) {
@@ -311,6 +340,18 @@ function runSchemaAndMigrations(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_exam_submissions_exam_stu ON exam_submissions(exam_id, student_id, status);
     CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, is_read, created_at);
     CREATE INDEX IF NOT EXISTS idx_submissions_student_q ON submissions(student_id, question_id);
+
+    CREATE TABLE IF NOT EXISTS class_teachers (
+      class_id TEXT NOT NULL,
+      teacher_id TEXT NOT NULL,
+      relation TEXT NOT NULL,
+      PRIMARY KEY (class_id, teacher_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_class_teachers_teacher ON class_teachers(teacher_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_platform_user_id
+      ON users(platform_user_id) WHERE platform_user_id IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_classes_platform_class_id
+      ON classes(platform_class_id) WHERE platform_class_id IS NOT NULL;
   `);
 
   // Non-destructive migration from legacy students & admins tables into users
@@ -417,6 +458,77 @@ function initializeDefaults(db: Database.Database) {
     ).run(hash, now, now);
   }
 
+  // 平台对接模式下教师、班级、学生都来自平台镜像：不创建演示数据，
+  // 也不做“未归属学生挂到默认班”的兜底（平台上“没有班级”是合法状态）
+  if (APP_CONFIG.platform.authMode !== 'platform') {
+    seedDemoSchoolData(db, now);
+  }
+
+  // 3. Seed built-in knowledge points
+  const kpCount = db
+    .prepare('SELECT COUNT(*) as cnt FROM knowledge_points')
+    .get() as { cnt: number };
+  if (kpCount.cnt === 0) {
+    const insertKp = db.prepare(
+      `INSERT INTO knowledge_points (id, type, chapter, name, is_system, owner_id, created_at)
+       VALUES (?, ?, ?, ?, 1, '', ?)`
+    );
+    const txKp = db.transaction(() => {
+      for (const kp of BUILTIN_KNOWLEDGE_POINTS) {
+        insertKp.run(kp.id, kp.type, kp.chapter, kp.name, now);
+      }
+    });
+    txKp();
+  }
+
+  // 4. Seed built-in questions
+  const qCount = db
+    .prepare('SELECT COUNT(*) as cnt FROM questions')
+    .get() as { cnt: number };
+  if (qCount.cnt === 0) {
+    const insertQ = db.prepare(`
+      INSERT INTO questions (
+        id, title, type, difficulty, knowledge_points_json, knowledge_point_ids_json, scenario,
+        total_score, materials_json, steps_json, checkpoints_json,
+        reference_answer_json, analysis_json, common_mistakes_json,
+        status, source, owner_id, visibility, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'system', 'public', ?, ?)
+    `);
+
+    const tx = db.transaction((questions: Omit<Question, 'ownerId' | 'visibility'>[]) => {
+      for (const q of questions) {
+        insertQ.run(
+          q.id,
+          q.title,
+          q.type,
+          q.difficulty,
+          JSON.stringify(q.knowledgePoints),
+          q.scenario,
+          q.totalScore,
+          JSON.stringify(q.materials),
+          JSON.stringify(q.steps),
+          JSON.stringify(q.checkpoints),
+          JSON.stringify(q.referenceAnswer),
+          JSON.stringify(q.analysis),
+          JSON.stringify(q.commonMistakes),
+          q.status,
+          q.source,
+          q.createdAt,
+          q.updatedAt
+        );
+      }
+    });
+    tx(SEED_QUESTIONS);
+  }
+
+  // 5. Seed 1 published sample exam for default teacher & default class
+  if (APP_CONFIG.platform.authMode !== 'platform') {
+    seedSampleExam(db, now);
+  }
+}
+
+// 演示教师、演示班级、演示学生、“未归属学生挂到默认班”的兜底与默认注册归属设置（仅本地账号模式）
+function seedDemoSchoolData(db: Database.Database, now: string) {
   let teacherRow = db
     .prepare("SELECT id FROM users WHERE username = 'liujyteacher'")
     .get() as { id: string } | undefined;
@@ -484,65 +596,22 @@ function initializeDefaults(db: Database.Database) {
       "INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('default_registration_class_id', ?, ?)"
     ).run(defaultClass.id, now);
   }
+}
 
-  // 3. Seed built-in knowledge points
-  const kpCount = db
-    .prepare('SELECT COUNT(*) as cnt FROM knowledge_points')
-    .get() as { cnt: number };
-  if (kpCount.cnt === 0) {
-    const insertKp = db.prepare(
-      `INSERT INTO knowledge_points (id, type, chapter, name, is_system, owner_id, created_at)
-       VALUES (?, ?, ?, ?, 1, '', ?)`
-    );
-    const txKp = db.transaction(() => {
-      for (const kp of BUILTIN_KNOWLEDGE_POINTS) {
-        insertKp.run(kp.id, kp.type, kp.chapter, kp.name, now);
-      }
-    });
-    txKp();
-  }
+// 给演示教师与演示班级发布一套示例考试（仅本地账号模式）
+function seedSampleExam(db: Database.Database, now: string) {
+  const teacherRow = db
+    .prepare("SELECT id FROM users WHERE username = 'liujyteacher'")
+    .get() as { id: string } | undefined;
+  const defaultClass = teacherRow
+    ? (db
+        .prepare('SELECT id, name, grade FROM classes WHERE teacher_id = ? LIMIT 1')
+        .get(teacherRow.id) as
+        | { id: string; name: string; grade: string }
+        | undefined)
+    : undefined;
+  if (!teacherRow || !defaultClass) return;
 
-  // 4. Seed built-in questions
-  const qCount = db
-    .prepare('SELECT COUNT(*) as cnt FROM questions')
-    .get() as { cnt: number };
-  if (qCount.cnt === 0) {
-    const insertQ = db.prepare(`
-      INSERT INTO questions (
-        id, title, type, difficulty, knowledge_points_json, knowledge_point_ids_json, scenario,
-        total_score, materials_json, steps_json, checkpoints_json,
-        reference_answer_json, analysis_json, common_mistakes_json,
-        status, source, owner_id, visibility, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'system', 'public', ?, ?)
-    `);
-
-    const tx = db.transaction((questions: Omit<Question, 'ownerId' | 'visibility'>[]) => {
-      for (const q of questions) {
-        insertQ.run(
-          q.id,
-          q.title,
-          q.type,
-          q.difficulty,
-          JSON.stringify(q.knowledgePoints),
-          q.scenario,
-          q.totalScore,
-          JSON.stringify(q.materials),
-          JSON.stringify(q.steps),
-          JSON.stringify(q.checkpoints),
-          JSON.stringify(q.referenceAnswer),
-          JSON.stringify(q.analysis),
-          JSON.stringify(q.commonMistakes),
-          q.status,
-          q.source,
-          q.createdAt,
-          q.updatedAt
-        );
-      }
-    });
-    tx(SEED_QUESTIONS);
-  }
-
-  // 5. Seed 1 published sample exam for default teacher & default class
   const examCount = db
     .prepare('SELECT COUNT(*) as cnt FROM exams')
     .get() as { cnt: number };
@@ -592,7 +661,6 @@ function initializeDefaults(db: Database.Database) {
     );
   }
 }
-
 export function rowToQuestion(row: Record<string, unknown>): Question {
   return {
     id: String(row.id),
@@ -654,6 +722,9 @@ export interface DefaultRegistrationTarget {
 export function getDefaultRegistrationTarget(
   dbArg?: Database.Database
 ): DefaultRegistrationTarget | null {
+  // 平台对接模式下没有"自助注册学生"，这套默认归属设置不再使用
+  if (APP_CONFIG.platform.authMode === 'platform') return null;
+
   const db = dbArg ?? getDb();
   const teacherSetting = db
     .prepare(

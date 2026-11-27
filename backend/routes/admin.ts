@@ -24,6 +24,8 @@ import {
   regenerateQuestionAnswer,
 } from '../services/llm';
 import { maskApiKey } from '../utils/mask';
+import { getTeacherClassIds, rejectWhenPlatformManaged } from '../platform/teacherScope';
+import platformAdminRoutes from '../platform/adminRoutes';
 import type {
   DifficultyLevel,
   ExamQuestionResult,
@@ -91,6 +93,9 @@ router.post('/auth/login', loginRateLimiter, (req, res) => {
 
 // Protect all subsequent super_admin routes
 router.use(requireAdminAuth);
+
+// 平台对接：连接状态、班级对齐、旧账号合并
+router.use('/platform', platformAdminRoutes);
 
 router.get('/auth/me', (req: AuthedRequest, res) => {
   const db = getDb();
@@ -1380,6 +1385,20 @@ router.get('/users', (req, res) => {
     list.push({ id: c.id, name: c.name, grade: c.grade });
     classesByTeacher.set(c.teacher_id, list);
   }
+  // 学科教师等额外授课关系（class_teachers）也计入"名下班级"
+  const extraRelations = db
+    .prepare(
+      `SELECT ct.teacher_id, c.id, c.name, c.grade FROM class_teachers ct
+       INNER JOIN classes c ON c.id = ct.class_id ORDER BY c.created_at ASC`
+    )
+    .all() as Array<{ teacher_id: string; id: string; name: string; grade: string }>;
+  for (const c of extraRelations) {
+    const list = classesByTeacher.get(c.teacher_id) || [];
+    if (!list.some((item) => item.id === c.id)) {
+      list.push({ id: c.id, name: c.name, grade: c.grade });
+    }
+    classesByTeacher.set(c.teacher_id, list);
+  }
 
   const defaultRegistration = getDefaultRegistrationTarget(db);
 
@@ -1401,6 +1420,8 @@ router.get('/users', (req, res) => {
         classId: r.class_id || '',
         isDisabled: Boolean(r.is_disabled),
         mustChangePassword: Boolean(r.must_change_password),
+        platformUserId: r.platform_user_id ?? null,
+        platformRole: r.platform_role || '',
         isDefaultRegistrationTeacher: isDefaultTeacher,
         defaultRegistrationClassId: isDefaultTeacher
           ? defaultRegistration?.classId || ''
@@ -1421,6 +1442,8 @@ router.get('/users', (req, res) => {
 });
 
 router.put('/settings/default-registration', (req: AuthedRequest, res) => {
+  if (rejectWhenPlatformManaged(res)) return;
+
   const schema = z.object({
     teacherId: z.string().trim(),
     classId: z.string().trim().optional(),
@@ -1584,6 +1607,8 @@ function createTeacherAssignedExam(
 }
 
 router.post('/users/teacher', async (req: AuthedRequest, res) => {
+  if (rejectWhenPlatformManaged(res, '教师账号由个性化学习平台的角色审批产生，不能在这里创建')) return;
+
   const schema = z.object({
     username: z
       .string()
@@ -1740,9 +1765,15 @@ router.post('/users/:id/assign-questions', (req: AuthedRequest, res) => {
     return;
   }
 
-  const teacherClasses = db
-    .prepare('SELECT id, name FROM classes WHERE teacher_id = ?')
-    .all(teacherId) as Array<{ id: string; name: string }>;
+  const teacherClassIds = getTeacherClassIds(db, teacherId);
+  const teacherClasses =
+    teacherClassIds.length > 0
+      ? (db
+          .prepare(
+            `SELECT id, name FROM classes WHERE id IN (${teacherClassIds.map(() => '?').join(', ')})`
+          )
+          .all(...teacherClassIds) as Array<{ id: string; name: string }>)
+      : [];
 
   let targetClassIds = parsed.data.classIds?.filter(Boolean) || [];
   if (targetClassIds.length > 0) {
@@ -1754,6 +1785,9 @@ router.post('/users/:id/assign-questions', (req: AuthedRequest, res) => {
   } else if (teacherClasses.length > 0) {
     targetClassIds = teacherClasses.map((c) => c.id);
   } else {
+    if (rejectWhenPlatformManaged(res, '该教师在平台上还没有班级，请先在平台为其分配班级')) {
+      return;
+    }
     // Auto-provision default class if teacher has none
     const newClassId = `cls-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     let inviteCode = generateInviteCode();
@@ -1811,6 +1845,8 @@ router.post('/users/:id/assign-questions', (req: AuthedRequest, res) => {
 });
 
 router.patch('/users/:id/role', (req: AuthedRequest, res) => {
+  if (rejectWhenPlatformManaged(res, '角色由个性化学习平台决定，不能在这里变更')) return;
+
   const schema = z.object({
     role: z.enum(['super_admin', 'teacher', 'student']),
   });
@@ -1935,6 +1971,8 @@ router.patch('/users/:id/status', (req: AuthedRequest, res) => {
 });
 
 router.post('/users/:id/reset-password', (req: AuthedRequest, res) => {
+  if (rejectWhenPlatformManaged(res, '密码由个性化学习平台统一管理，请到平台重置')) return;
+
   const schema = z.object({
     newPassword: z.string().min(6, '新密码至少 6 位').max(64),
   });
@@ -1975,6 +2013,8 @@ router.post('/users/:id/reset-password', (req: AuthedRequest, res) => {
 });
 
 router.patch('/users/:id/assign', (req: AuthedRequest, res) => {
+  if (rejectWhenPlatformManaged(res, '班级归属由个性化学习平台统一管理，不能在这里调班')) return;
+
   const schema = z.object({
     classId: z.string().min(1, '请选择目标班级'),
   });
@@ -2085,6 +2125,8 @@ router.get('/students', (req, res) => {
 });
 
 router.post('/students/:id/reset-password', (req: AuthedRequest, res) => {
+  if (rejectWhenPlatformManaged(res, '密码由个性化学习平台统一管理，请到平台重置')) return;
+
   const schema = z.object({
     newPassword: z.string().min(6, '密码至少 6 位').max(64),
   });

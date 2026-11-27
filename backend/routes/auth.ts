@@ -9,6 +9,14 @@ import {
   requirePortalAuth,
   signPortalToken,
 } from '../middleware/auth';
+import { APP_CONFIG } from '../config';
+import {
+  changePasswordViaPlatform,
+  loginWithPlatformPassword,
+  loginWithPlatformToken,
+  publicAuthConfig,
+  sendAuthError,
+} from '../platform/auth';
 
 const router = Router();
 
@@ -44,6 +52,11 @@ const LoginSchema = z.object({
 
 // Student self-registration ONLY (automatically binds to configured default teacher & class)
 router.post('/register', registerRateLimiter, async (req, res) => {
+  if (APP_CONFIG.platform.authMode === 'platform') {
+    res.status(403).json({ error: '账号由个性化学习平台统一管理，请到平台注册' });
+    return;
+  }
+
   const parsed = RegisterSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({
@@ -128,6 +141,17 @@ router.post('/login', loginRateLimiter, async (req, res) => {
   }
 
   const { username, password } = parsed.data;
+
+  // 平台对接模式：把账号密码交给平台校验（见 backend/platform/auth.ts）
+  if (APP_CONFIG.platform.authMode === 'platform') {
+    try {
+      res.json(await loginWithPlatformPassword(username, password));
+    } catch (err) {
+      sendAuthError(res, err);
+    }
+    return;
+  }
+
   const db = getDb();
   const user = db
     .prepare('SELECT * FROM users WHERE username = ?')
@@ -211,6 +235,31 @@ router.post('/login', loginRateLimiter, async (req, res) => {
   });
 });
 
+// 公开的前端配置：当前是本地账号模式还是平台对接模式、哪些入口开放
+router.get('/config', (_req, res) => {
+  res.json(publicAuthConfig());
+});
+
+// 单点入口：学生或教师已在平台登录，带平台凭证进入（不调用平台的登录接口）
+// 每次调用都会去平台核对一次凭证，所以与登录一样限流
+router.post('/sso', loginRateLimiter, async (req, res) => {
+  if (APP_CONFIG.platform.authMode !== 'platform') {
+    res.status(403).json({ error: '当前未启用平台对接' });
+    return;
+  }
+  const platformToken =
+    typeof req.body?.platformToken === 'string' ? req.body.platformToken : '';
+  if (!platformToken) {
+    res.status(400).json({ error: '缺少平台登录凭证' });
+    return;
+  }
+  try {
+    res.json(await loginWithPlatformToken(platformToken));
+  } catch (err) {
+    sendAuthError(res, err);
+  }
+});
+
 router.get('/me', requirePortalAuth, (req: AuthedRequest, res) => {
   const db = getDb();
   const u = req.user!;
@@ -248,7 +297,7 @@ router.get('/me', requirePortalAuth, (req: AuthedRequest, res) => {
   });
 });
 
-router.post('/change-password', requirePortalAuth, (req: AuthedRequest, res) => {
+router.post('/change-password', requirePortalAuth, async (req: AuthedRequest, res) => {
   const schema = z.object({
     oldPassword: z.string().min(1, '请输入原密码'),
     newPassword: z.string().min(6, '新密码不能少于 6 位').max(64),
@@ -256,6 +305,22 @@ router.post('/change-password', requirePortalAuth, (req: AuthedRequest, res) => 
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0]?.message || '参数错误' });
+    return;
+  }
+
+  // 平台对接模式：密码由平台保存，改密代为提交给平台
+  if (APP_CONFIG.platform.authMode === 'platform') {
+    try {
+      await changePasswordViaPlatform(
+        req,
+        parsed.data.oldPassword,
+        parsed.data.newPassword
+      );
+    } catch (err) {
+      sendAuthError(res, err);
+      return;
+    }
+    res.json({ ok: true });
     return;
   }
 
@@ -283,6 +348,10 @@ router.put('/profile', requirePortalAuth, (req: AuthedRequest, res) => {
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: '姓名格式不正确' });
+    return;
+  }
+  if (APP_CONFIG.platform.authMode === 'platform') {
+    res.status(403).json({ error: '姓名由个性化学习平台统一维护，请在平台修改' });
     return;
   }
   const db = getDb();

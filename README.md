@@ -47,4 +47,6 @@ npm install --legacy-peer-deps --package-lock-only
 ```
 
 - **本地一键部署 (`redeploy.bat`)**：构建镜像并启动容器 `personlearning_caozuoti`，映射宿主机端口 `7901 -> 3000`，持久化数据目录挂载至 `D:\docker\personlearning_caozuoti\data`，访问 `http://localhost:7901`。
+- **平台对接（2026-11-27）**：`redeploy.bat` 默认以 `AUTH_MODE=platform` 运行，教师与学生使用个性化学习平台（personlearning）账号登录，容器加入平台的 `mynet` 网络；首次运行会在 `D:\docker\personlearning_caozuoti\.env` 自动生成随机 JWT 密钥。把脚本里的 `AUTH_MODE` 改回 `local` 重新运行即可回滚。入口、配置与存量账号迁移说明见 `成员验证对接平台-设计文档.md`。
+- **切换前试运行 (`deploy\trial-7902.bat`)**：用数据目录的副本在 `7902` 端口起一个测试容器联调，不影响 `7901` 的正式容器。
 - **远程一键部署 (`upload2remote.bat`)**：本地构建镜像导出 tar 包并上传至远程服务器加载运行，持久化目录为 `/bak/docker/personlearning_caozuoti/data`，映射外部端口 `7901`。

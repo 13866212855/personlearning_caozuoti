@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { KeyRound, Loader2, Save, User, UserCheck } from 'lucide-react';
 import { portalFetch } from '@/lib/api';
+import { useAuthConfig } from '@/hooks/useAuthConfig';
 import type { PortalUser } from '@/lib/types';
 
 interface TeacherSettingsTabProps {
@@ -23,6 +24,9 @@ export default function TeacherSettingsTab({
   const [realName, setRealName] = useState(teacher.realName);
   const [profileMsg, setProfileMsg] = useState('');
   const [profileErr, setProfileErr] = useState('');
+  const auth = useAuthConfig();
+  // 平台对接模式下：默认归属设置与姓名修改由平台管理，仅保留密码修改（同步到平台）
+  const managed = auth ? !auth.memberManagement : true;
 
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -146,8 +150,9 @@ export default function TeacherSettingsTab({
 
   return (
     <div className="space-y-6 max-w-4xl">
-      {/* Default Registration Teacher Setting Card */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4 text-xs">
+      {/* Default Registration Teacher Setting Card (local mode only) */}
+      {!managed && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4 text-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <UserCheck className="w-4 h-4 text-teal-600" />
@@ -238,9 +243,39 @@ export default function TeacherSettingsTab({
             </div>
           </div>
         )}
-      </div>
+        </div>
+      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className={managed ? 'grid grid-cols-1 gap-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-6'}>
+        {managed ? (
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-3 text-xs">
+            <div className="flex items-center gap-2">
+              <User className="w-4 h-4 text-sky-700" />
+              <h3 className="text-base font-bold text-slate-900">个人基本资料</h3>
+            </div>
+            <label className="block space-y-1">
+              <span className="text-slate-600 font-medium">登录用户名</span>
+              <input
+                type="text"
+                disabled
+                value={teacher.username}
+                className="w-full h-9 px-3 border border-slate-200 bg-slate-50 rounded-lg text-sm font-mono text-slate-500"
+              />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-slate-600 font-medium">教师姓名</span>
+              <input
+                type="text"
+                disabled
+                value={teacher.realName}
+                className="w-full h-9 px-3 border border-slate-200 bg-slate-50 rounded-lg text-sm text-slate-500"
+              />
+            </label>
+            <p className="text-slate-500 leading-relaxed">
+              平台对接模式下，姓名等资料由个性化学习平台统一维护，请到平台修改。
+            </p>
+          </div>
+        ) : (
         <form
           onSubmit={handleSaveProfile}
           className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4 text-xs"
@@ -290,6 +325,7 @@ export default function TeacherSettingsTab({
             <span>保存资料</span>
           </button>
         </form>
+        )}
 
         <form
           onSubmit={handleSavePassword}
@@ -299,6 +335,12 @@ export default function TeacherSettingsTab({
             <KeyRound className="w-4 h-4 text-sky-700" />
             <h3 className="text-base font-bold text-slate-900">修改登录密码</h3>
           </div>
+
+          {managed && (
+            <p className="p-2.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-800 leading-relaxed">
+              平台对接模式：在此修改密码会同步更新你在个性化学习平台上的登录密码。
+            </p>
+          )}
 
           {pwdMsg && (
             <div className="p-3 rounded-lg bg-teal-50 border border-teal-200 text-teal-800">

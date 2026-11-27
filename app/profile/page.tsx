@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import GradingReport from '@/components/GradingReport';
 import StudentHeader from '@/components/StudentHeader';
+import { useAuthConfig } from '@/hooks/useAuthConfig';
 import {
   clearPortalToken,
   getCachedPortalUser,
@@ -86,6 +87,7 @@ function ProfileContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialTab = searchParams.get('tab');
+  const platformMode = useAuthConfig()?.mode === 'platform';
 
   const [user, setUser] = useState<PortalUser | null>(null);
   const [tab, setTab] = useState<
@@ -898,6 +900,11 @@ function ProfileContent() {
                 <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
                   {pwdErr}
                 </div>
+              )}
+              {platformMode && (
+                <p className="p-2.5 rounded-lg bg-sky-50 border border-sky-200 text-xs text-sky-800 leading-relaxed">
+                  在这里修改密码，会同步修改你在个性化学习平台上的登录密码。
+                </p>
               )}
 
               <form onSubmit={handleChangePassword} className="space-y-3 text-xs">

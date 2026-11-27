@@ -11,6 +11,14 @@ import {
 import { gradeAnswerDeterministic } from '../grader';
 import { type AuthedRequest, requireTeacherAuth } from '../middleware/auth';
 import {
+  ownsAllStudents,
+  ownsAssignments,
+  ownsClass,
+  rejectWhenPlatformManaged,
+  teacherClassCondition,
+  teacherStudentCondition,
+} from '../platform/teacherScope';
+import {
   generateQuestionWithAi,
   getTeacherTodayAiUsage,
   recordAiGenerationUsage,
@@ -77,8 +85,10 @@ router.get('/overview', (req: AuthedRequest, res) => {
   const teacherId = req.teacher!.id;
 
   const classRows = db
-    .prepare('SELECT id, name, grade, invite_code FROM classes WHERE teacher_id = ?')
-    .all(teacherId) as Array<{
+    .prepare(
+      `SELECT id, name, grade, invite_code FROM classes c WHERE ${teacherClassCondition('c')}`
+    )
+    .all(teacherId, teacherId) as Array<{
     id: string;
     name: string;
     grade: string;
@@ -87,9 +97,9 @@ router.get('/overview', (req: AuthedRequest, res) => {
 
   const studentCountRow = db
     .prepare(
-      "SELECT COUNT(*) as cnt FROM users WHERE role = 'student' AND teacher_id = ?"
+      `SELECT COUNT(*) as cnt FROM users WHERE role = 'student' AND ${teacherStudentCondition()}`
     )
-    .get(teacherId) as { cnt: number };
+    .get(teacherId, teacherId) as { cnt: number };
 
   const examRows = db
     .prepare('SELECT * FROM exams WHERE teacher_id = ? ORDER BY created_at DESC')
@@ -175,10 +185,10 @@ router.get('/classes', (req: AuthedRequest, res) => {
       `SELECT c.*,
               (SELECT COUNT(*) FROM users u WHERE u.role = 'student' AND u.class_id = c.id) as student_count
        FROM classes c
-       WHERE c.teacher_id = ?
+       WHERE ${teacherClassCondition('c')}
        ORDER BY c.created_at DESC`
     )
-    .all(teacherId) as Array<Record<string, unknown>>;
+    .all(teacherId, teacherId) as Array<Record<string, unknown>>;
 
   const defaultTarget = getDefaultRegistrationTarget(db);
   const isDefaultTeacher = defaultTarget?.teacherId === teacherId;
@@ -223,6 +233,8 @@ router.get('/settings/default-registration', (req: AuthedRequest, res) => {
 });
 
 router.put('/settings/default-registration', (req: AuthedRequest, res) => {
+  if (rejectWhenPlatformManaged(res)) return;
+
   const schema = z.object({
     enabled: z.boolean().default(true),
     classId: z.string().trim().optional(),
@@ -270,6 +282,8 @@ router.put('/settings/default-registration', (req: AuthedRequest, res) => {
 });
 
 router.post('/classes', (req: AuthedRequest, res) => {
+  if (rejectWhenPlatformManaged(res, '班级由个性化学习平台统一管理，不能在这里新建')) return;
+
   const schema = z.object({
     name: z.string().trim().min(1, '班级名称不能为空').max(40),
     grade: z.string().trim().min(1, '年级不能为空').max(20),
@@ -316,6 +330,8 @@ router.post('/classes', (req: AuthedRequest, res) => {
 });
 
 router.put('/classes/:id', (req: AuthedRequest, res) => {
+  if (rejectWhenPlatformManaged(res, '班级由个性化学习平台统一管理，不能在这里编辑')) return;
+
   const schema = z.object({
     name: z.string().trim().min(1).max(40),
     grade: z.string().trim().min(1).max(20),
@@ -344,6 +360,8 @@ router.put('/classes/:id', (req: AuthedRequest, res) => {
 });
 
 router.post('/classes/:id/reset-invite', (req: AuthedRequest, res) => {
+  if (rejectWhenPlatformManaged(res, '班级由个性化学习平台统一管理，邀请码不再使用')) return;
+
   const db = getDb();
   const cls = db
     .prepare('SELECT id FROM classes WHERE id = ? AND teacher_id = ?')
@@ -371,9 +389,11 @@ router.post('/classes/:id/reset-invite', (req: AuthedRequest, res) => {
 router.get('/classes/:id/students', (req: AuthedRequest, res) => {
   const db = getDb();
   const classId = String(req.params.id);
-  const cls = db
-    .prepare('SELECT * FROM classes WHERE id = ? AND teacher_id = ?')
-    .get(classId, req.teacher!.id) as Record<string, unknown> | undefined;
+  const cls = ownsClass(db, req.teacher!.id, classId)
+    ? (db.prepare('SELECT * FROM classes WHERE id = ?').get(classId) as
+        | Record<string, unknown>
+        | undefined)
+    : undefined;
   if (!cls) {
     res.status(404).json({ error: '班级不存在或无权查看' });
     return;
@@ -383,8 +403,8 @@ router.get('/classes/:id/students', (req: AuthedRequest, res) => {
   const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize || 15)));
   const keyword = String(req.query.keyword || '').trim();
 
-  const where = ["role = 'student'", 'class_id = ?', 'teacher_id = ?'];
-  const args: unknown[] = [classId, req.teacher!.id];
+  const where = ["role = 'student'", 'class_id = ?'];
+  const args: unknown[] = [classId];
   if (keyword) {
     where.push('(username LIKE ? OR real_name LIKE ? OR student_no LIKE ?)');
     args.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
@@ -422,6 +442,8 @@ router.get('/classes/:id/students', (req: AuthedRequest, res) => {
 });
 
 router.post('/classes/:id/students', async (req: AuthedRequest, res) => {
+  if (rejectWhenPlatformManaged(res, '学生账号由个性化学习平台统一管理，不能在这里添加')) return;
+
   const schema = z.object({
     username: z
       .string()
@@ -487,6 +509,8 @@ router.post('/classes/:id/students', async (req: AuthedRequest, res) => {
 });
 
 router.post('/classes/:id/import-csv', async (req: AuthedRequest, res) => {
+  if (rejectWhenPlatformManaged(res, '学生账号由个性化学习平台统一管理，不能在这里导入')) return;
+
   const schema = z.object({
     csvText: z.string().min(1, '请粘贴或上传 CSV 内容'),
   });
@@ -572,6 +596,8 @@ router.post('/classes/:id/import-csv', async (req: AuthedRequest, res) => {
 });
 
 router.delete('/classes/:id/students/:studentId', (req: AuthedRequest, res) => {
+  if (rejectWhenPlatformManaged(res, '班级归属由个性化学习平台统一管理，不能在这里移出')) return;
+
   const db = getDb();
   const cls = db
     .prepare('SELECT id FROM classes WHERE id = ? AND teacher_id = ?')
@@ -594,6 +620,8 @@ router.delete('/classes/:id/students/:studentId', (req: AuthedRequest, res) => {
 });
 
 router.post('/students/:studentId/reset-password', async (req: AuthedRequest, res) => {
+  if (rejectWhenPlatformManaged(res, '密码由个性化学习平台统一管理，请到平台重置')) return;
+
   const schema = z.object({
     newPassword: z.string().min(6, '密码不能少于 6 位').max(64),
   });
@@ -629,8 +657,8 @@ router.get('/students', (req: AuthedRequest, res) => {
   const db = getDb();
   const classId = String(req.query.classId || '');
   const keyword = String(req.query.keyword || '').trim();
-  const where = ["role = 'student'", 'teacher_id = ?'];
-  const args: unknown[] = [req.teacher!.id];
+  const where = ["role = 'student'", teacherStudentCondition()];
+  const args: unknown[] = [req.teacher!.id, req.teacher!.id];
   if (classId) {
     where.push('class_id = ?');
     args.push(classId);
@@ -1108,27 +1136,14 @@ router.post('/questions/assign', (req: AuthedRequest, res) => {
     return;
   }
 
-  const tPlaceholders = uniqueTargetIds.map(() => '?').join(', ');
   if (d.targetType === 'class') {
-    const ownedClasses = db
-      .prepare(
-        `SELECT id FROM classes WHERE teacher_id = ? AND id IN (${tPlaceholders})`
-      )
-      .all(teacherId, ...uniqueTargetIds) as Array<{ id: string }>;
-    if (ownedClasses.length !== uniqueTargetIds.length) {
+    if (!uniqueTargetIds.every((classId) => ownsClass(db, teacherId, classId))) {
       res.status(403).json({ error: '只能将试题分配给本人名下的班级' });
       return;
     }
-  } else {
-    const ownedStudents = db
-      .prepare(
-        `SELECT id FROM users WHERE role = 'student' AND teacher_id = ? AND id IN (${tPlaceholders})`
-      )
-      .all(teacherId, ...uniqueTargetIds) as Array<{ id: string }>;
-    if (ownedStudents.length !== uniqueTargetIds.length) {
-      res.status(403).json({ error: '只能将试题分配给本人名下的学生' });
-      return;
-    }
+  } else if (!ownsAllStudents(db, teacherId, uniqueTargetIds)) {
+    res.status(403).json({ error: '只能将试题分配给本人名下的学生' });
+    return;
   }
 
   const firstTitle = qMap.get(uniqueQuestionIds[0])?.title || '操作题练习';
@@ -1467,6 +1482,11 @@ router.post('/exams', (req: AuthedRequest, res) => {
 
   const db = getDb();
   const d = parsed.data;
+  // 与 /questions/assign 保持同一规则：只能指派本人名下的班级或学生
+  if (!ownsAssignments(db, req.teacher!.id, d.assignments)) {
+    res.status(403).json({ error: '只能指派本人名下的班级或学生' });
+    return;
+  }
   const examId = `exam-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const now = new Date().toISOString();
   const status = d.publishNow ? 'published' : 'draft';
@@ -1566,6 +1586,10 @@ router.put('/exams/:id', (req: AuthedRequest, res) => {
   const d = parsed.data;
   const now = new Date().toISOString();
   const status = d.publishNow ? 'published' : 'draft';
+  if (!ownsAssignments(db, req.teacher!.id, d.assignments)) {
+    res.status(403).json({ error: '只能指派本人名下的班级或学生' });
+    return;
+  }
 
   const tx = db.transaction(() => {
     db.prepare(
@@ -2252,9 +2276,9 @@ router.get('/students/:studentId/analytics', (req: AuthedRequest, res) => {
   const studentId = String(req.params.studentId);
   const student = db
     .prepare(
-      "SELECT id, username, real_name, grade, class_name, student_no FROM users WHERE id = ? AND role = 'student' AND teacher_id = ?"
+      `SELECT id, username, real_name, grade, class_name, student_no FROM users WHERE id = ? AND role = 'student' AND ${teacherStudentCondition()}`
     )
-    .get(studentId, req.teacher!.id) as Record<string, unknown> | undefined;
+    .get(studentId, req.teacher!.id, req.teacher!.id) as Record<string, unknown> | undefined;
   if (!student) {
     res.status(404).json({ error: '学生不存在或不属于您的班级' });
     return;
@@ -2381,6 +2405,10 @@ router.post('/exams/:id/remedial-practice', async (req: AuthedRequest, res) => {
     .get(examId, req.teacher!.id) as { id: string; title: string } | undefined;
   if (!exam) {
     res.status(404).json({ error: '原考试不存在' });
+    return;
+  }
+  if (!ownsAllStudents(db, req.teacher!.id, parsed.data.targetStudentIds)) {
+    res.status(403).json({ error: '只能向本人名下的学生推送补练' });
     return;
   }
 

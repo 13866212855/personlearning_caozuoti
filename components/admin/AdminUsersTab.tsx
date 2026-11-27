@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import { adminFetch } from '@/lib/api';
+import { useAuthConfig } from '@/hooks/useAuthConfig';
 import { TYPE_LABELS, type QuestionType, type UserRole } from '@/lib/types';
 
 interface TeacherClassBrief {
@@ -40,6 +41,8 @@ interface AdminUserRow {
   defaultRegistrationClassId?: string;
   defaultRegistrationClassName?: string;
   teacherClasses?: TeacherClassBrief[];
+  platformUserId?: number | null;
+  platformRole?: string;
   createdAt: string;
 }
 
@@ -76,6 +79,9 @@ const ROLE_LABELS: Record<UserRole, string> = {
 };
 
 export default function AdminUsersTab() {
+  const auth = useAuthConfig();
+  // 平台对接模式下成员账号由平台统一管理：只保留分配试题/禁用与「继承旧账号」合并
+  const managed = auth ? !auth.memberManagement : true;
   const [items, setItems] = useState<AdminUserRow[]>([]);
   const [defaultReg, setDefaultReg] = useState<DefaultRegistrationInfo | null>(
     null
@@ -131,6 +137,12 @@ export default function AdminUsersTab() {
   const [assignTarget, setAssignTarget] = useState<AdminUserRow | null>(null);
   const [classes, setClasses] = useState<AdminClassRow[]>([]);
   const [targetClassId, setTargetClassId] = useState('');
+
+  // Merge Legacy Account Modal (platform mode: platform-bound row inherits an old local row)
+  const [mergeTarget, setMergeTarget] = useState<AdminUserRow | null>(null);
+  const [mergeCandidates, setMergeCandidates] = useState<AdminUserRow[]>([]);
+  const [mergeLegacyId, setMergeLegacyId] = useState('');
+  const [merging, setMerging] = useState(false);
 
   const load = useCallback(
     async (p = page) => {
@@ -426,6 +438,48 @@ export default function AdminUsersTab() {
     }
   };
 
+  const openMergeModal = async (u: AdminUserRow) => {
+    setErr('');
+    setMergeTarget(u);
+    setMergeLegacyId('');
+    try {
+      const res = await adminFetch<{ items: AdminUserRow[] }>(
+        `/api/admin/users?role=${u.role}&pageSize=50`
+      );
+      const candidates = res.items.filter(
+        (x) => !x.platformUserId && x.id !== u.id
+      );
+      setMergeCandidates(candidates);
+      if (candidates.length > 0) setMergeLegacyId(candidates[0].id);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '加载候选旧账号失败');
+    }
+  };
+
+  const handleMerge = async () => {
+    if (!mergeTarget || !mergeLegacyId) return;
+    setMerging(true);
+    setErr('');
+    try {
+      await adminFetch('/api/admin/platform/merge', {
+        method: 'POST',
+        body: JSON.stringify({ targetId: mergeTarget.id, legacyId: mergeLegacyId }),
+      });
+      const legacy = mergeCandidates.find((c) => c.id === mergeLegacyId);
+      setMsg(
+        `已合并：平台账号「${mergeTarget.username}」继承了旧账号「${
+          legacy?.username || mergeLegacyId
+        }」的历史数据，旧账号已停用`
+      );
+      setMergeTarget(null);
+      void load(page);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '合并旧账号失败');
+    } finally {
+      setMerging(false);
+    }
+  };
+
   const totalPages = Math.max(1, Math.ceil(total / 15));
 
   return (
@@ -434,20 +488,34 @@ export default function AdminUsersTab() {
         <div>
           <h2 className="text-lg font-bold text-slate-900">用户与角色管理</h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            管理全站超级管理员、教师与学生账号；可指定任意教师默认接收新自助注册的学生
+            {managed
+              ? '平台对接模式：账号与角色由个性化学习平台统一管理；此处可分配试题、禁用账号，并处理旧账号数据合并'
+              : '管理全站超级管理员、教师与学生账号；可指定任意教师默认接收新自助注册的学生'}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void openCreateTeacherModal()}
-          className="h-9 px-4 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5 self-start"
-        >
-          <UserPlus className="w-3.5 h-3.5" />
-          <span>创建教师账号</span>
-        </button>
+        {!managed && (
+          <button
+            type="button"
+            onClick={() => void openCreateTeacherModal()}
+            className="h-9 px-4 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5 self-start"
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            <span>创建教师账号</span>
+          </button>
+        )}
       </div>
 
-      {/* Default Student Registration Teacher Banner */}
+      {/* Default Student Registration Teacher Banner (local) / Platform notice (platform) */}
+      {managed ? (
+        <div className="p-3.5 rounded-xl bg-sky-50/70 border border-sky-200 flex items-center gap-2 text-xs text-sky-900">
+          <UserCheck className="w-4 h-4 text-sky-600 shrink-0" />
+          <span>
+            平台对接模式：教师与学生的账号、角色、班级归属均在个性化学习平台维护，本页数据为平台成员的只读同步副本。带
+            <span className="font-semibold mx-0.5">平台</span>
+            标记的账号已与平台绑定；如有同名旧本地账号，可点「继承旧账号」合并历史数据。
+          </span>
+        </div>
+      ) : (
       <div className="p-3.5 rounded-xl bg-teal-50/70 border border-teal-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-teal-900">
         <div className="flex items-center gap-2">
           <UserCheck className="w-4 h-4 text-teal-600 shrink-0" />
@@ -469,6 +537,7 @@ export default function AdminUsersTab() {
           学生注册无需输入邀请码，注册后自动加入该教师对应班级
         </span>
       </div>
+      )}
 
       {msg && (
         <div className="p-3 rounded-lg bg-teal-50 border border-teal-200 text-xs text-teal-800">
@@ -539,6 +608,11 @@ export default function AdminUsersTab() {
                     <td className="py-3 px-4">
                       <div className="font-mono font-semibold text-slate-900">
                         {u.username}
+                        {managed && u.platformUserId != null && (
+                          <span className="ml-1.5 px-1.5 py-0.5 rounded bg-sky-50 border border-sky-200 text-[10px] font-semibold text-sky-700 align-middle">
+                            平台
+                          </span>
+                        )}
                       </div>
                       <div className="text-[11px] text-slate-500">{u.realName}</div>
                     </td>
@@ -617,21 +691,23 @@ export default function AdminUsersTab() {
                             <Send className="w-3 h-3" />
                             <span>分配试题</span>
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => openDefaultTeacherModal(u)}
-                            className="text-teal-700 hover:underline inline-flex items-center gap-0.5 font-medium"
-                          >
-                            <UserCheck className="w-3 h-3" />
-                            <span>
-                              {u.isDefaultRegistrationTeacher
-                                ? '调整默认班级'
-                                : '设为默认归属'}
-                            </span>
-                          </button>
+                          {!managed && (
+                            <button
+                              type="button"
+                              onClick={() => openDefaultTeacherModal(u)}
+                              className="text-teal-700 hover:underline inline-flex items-center gap-0.5 font-medium"
+                            >
+                              <UserCheck className="w-3 h-3" />
+                              <span>
+                                {u.isDefaultRegistrationTeacher
+                                  ? '调整默认班级'
+                                  : '设为默认归属'}
+                              </span>
+                            </button>
+                          )}
                         </>
                       )}
-                      {u.role === 'student' && (
+                      {!managed && u.role === 'student' && (
                         <button
                           type="button"
                           onClick={() => void openAssignModal(u)}
@@ -641,28 +717,42 @@ export default function AdminUsersTab() {
                           <span>调班</span>
                         </button>
                       )}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setRoleTarget(u);
-                          setTargetRole(u.role);
-                        }}
-                        className="text-slate-700 hover:underline inline-flex items-center gap-0.5"
-                      >
-                        <Shield className="w-3 h-3" />
-                        <span>角色</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setResetTarget(u);
-                          setNewPwd('');
-                        }}
-                        className="text-sky-700 hover:underline inline-flex items-center gap-0.5"
-                      >
-                        <KeyRound className="w-3 h-3" />
-                        <span>改密</span>
-                      </button>
+                      {managed && u.platformUserId != null && (
+                        <button
+                          type="button"
+                          onClick={() => void openMergeModal(u)}
+                          className="text-teal-700 hover:underline inline-flex items-center gap-0.5"
+                        >
+                          <ArrowRightLeft className="w-3 h-3" />
+                          <span>继承旧账号</span>
+                        </button>
+                      )}
+                      {!managed && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRoleTarget(u);
+                            setTargetRole(u.role);
+                          }}
+                          className="text-slate-700 hover:underline inline-flex items-center gap-0.5"
+                        >
+                          <Shield className="w-3 h-3" />
+                          <span>角色</span>
+                        </button>
+                      )}
+                      {!managed && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setResetTarget(u);
+                            setNewPwd('');
+                          }}
+                          className="text-sky-700 hover:underline inline-flex items-center gap-0.5"
+                        >
+                          <KeyRound className="w-3 h-3" />
+                          <span>改密</span>
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => void handleToggleStatus(u)}
@@ -1232,6 +1322,56 @@ export default function AdminUsersTab() {
                 className="px-4 py-2 bg-sky-600 text-white rounded-lg font-medium"
               >
                 确认调整
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Merge Legacy Account Modal (platform mode only) */}
+      {mergeTarget && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl border border-slate-200 p-5 w-full max-w-sm space-y-4 text-xs">
+            <h3 className="text-base font-bold text-slate-900">
+              继承旧账号 - {mergeTarget.username}
+            </h3>
+            <p className="text-slate-600 leading-relaxed">
+              选择该账号对应的旧本地账号。合并后，旧账号的历史成绩、提交记录与通知将全部转移到平台账号「
+              <span className="font-semibold">{mergeTarget.username}</span>
+              」名下，旧账号随即停用，此操作不可撤销。
+            </p>
+            {mergeCandidates.length === 0 ? (
+              <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-slate-500">
+                当前没有可合并的同角色旧本地账号。
+              </div>
+            ) : (
+              <select
+                value={mergeLegacyId}
+                onChange={(e) => setMergeLegacyId(e.target.value)}
+                className="w-full h-9 px-3 border border-slate-300 rounded-lg bg-white text-sm"
+              >
+                {mergeCandidates.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.username}（{c.realName || '未命名'}）
+                  </option>
+                ))}
+              </select>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setMergeTarget(null)}
+                className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={merging || !mergeLegacyId}
+                onClick={() => void handleMerge()}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-lg font-medium"
+              >
+                {merging ? '合并中...' : '确认合并'}
               </button>
             </div>
           </div>

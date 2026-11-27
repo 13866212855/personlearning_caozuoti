@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { BookOpen, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { BookOpen, Eye, EyeOff, Loader2, LogIn } from 'lucide-react';
+import { useAuthConfig } from '@/hooks/useAuthConfig';
 import {
   clearPortalToken,
   getCachedPortalUser,
@@ -24,6 +25,8 @@ export default function PortalLoginPage() {
     'idle'
   );
   const [resumingSession, setResumingSession] = useState(false);
+  const auth = useAuthConfig();
+  const platformMode = auth?.mode === 'platform';
 
   useEffect(() => {
     router.prefetch('/');
@@ -143,9 +146,28 @@ export default function PortalLoginPage() {
             高中信息技术会考·操作题系统
           </h1>
           <p className="text-sm text-slate-500">
-            教师与学生统一登录入口，请使用个人账号登录
+            {platformMode
+              ? '请使用个性化学习平台账号登录'
+              : '教师与学生统一登录入口，请使用个人账号登录'}
           </p>
         </div>
+
+        {auth?.ssoEnabled && auth.ssoEntryUrl && (
+          <>
+            <a
+              href={auth.ssoEntryUrl}
+              className="w-full h-10 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg text-sm flex items-center justify-center gap-2"
+            >
+              <LogIn className="w-4 h-4" />
+              <span>从个性化学习平台进入</span>
+            </a>
+            <div className="flex items-center gap-3 text-xs text-slate-400">
+              <span className="flex-1 h-px bg-slate-200" />
+              <span>或在下方用平台账号密码登录</span>
+              <span className="flex-1 h-px bg-slate-200" />
+            </div>
+          </>
+        )}
 
         {error && (
           <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
@@ -223,15 +245,41 @@ export default function PortalLoginPage() {
           </button>
         </form>
 
-        <div className="text-center text-sm text-slate-600 pt-2 border-t border-slate-100">
-          还没有学生账号？{' '}
-          <Link
-            href="/register"
-            className="text-sky-700 font-medium hover:underline"
-          >
-            学生自助注册
-          </Link>
-        </div>
+        {platformMode && auth?.studentDirectLogin === 'warn' && (
+          <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 leading-relaxed">
+            学生注意：在这里直接登录，会退出你在个性化学习平台上的登录。平时请从平台入口进入。
+          </div>
+        )}
+        {platformMode && auth?.studentDirectLogin === 'deny' && (
+          <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 leading-relaxed">
+            学生请从个性化学习平台进入本系统；在这里登录仅供教师使用。
+          </div>
+        )}
+
+        {auth?.registrationEnabled && (
+          <div className="text-center text-sm text-slate-600 pt-2 border-t border-slate-100">
+            还没有学生账号？{' '}
+            <Link
+              href="/register"
+              className="text-sky-700 font-medium hover:underline"
+            >
+              学生自助注册
+            </Link>
+          </div>
+        )}
+        {platformMode && auth.platformRegisterUrl && (
+          <div className="text-center text-sm text-slate-600 pt-2 border-t border-slate-100">
+            还没有平台账号？{' '}
+            <a
+              href={auth.platformRegisterUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sky-700 font-medium hover:underline"
+            >
+              到个性化学习平台注册
+            </a>
+          </div>
+        )}
       </div>
     </div>
   );

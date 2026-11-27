@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import { portalFetch } from '@/lib/api';
+import { useAuthConfig } from '@/hooks/useAuthConfig';
 import type { ClassItem } from '@/lib/types';
 
 interface ClassStudent {
@@ -47,6 +48,9 @@ export default function TeacherClassesTab() {
   const [savingDefault, setSavingDefault] = useState(false);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
+  const auth = useAuthConfig();
+  // 平台对接模式下成员与班级由平台管理；配置加载完成前也先按"由平台管理"处理，避免这些控件闪现
+  const managed = auth ? !auth.memberManagement : true;
 
   // Create/Edit Class Modal
   const [classModal, setClassModal] = useState<{
@@ -325,60 +329,77 @@ export default function TeacherClassesTab() {
         <div>
           <h2 className="text-lg font-bold text-slate-900">班级与学生管理</h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            管理名下班级与学生名单，支持设置「新学生注册默认接收班级」、单个添加与 CSV 批量导入
+            {managed
+              ? '查看名下班级与学生名单；成员数据由个性化学习平台统一同步维护'
+              : '管理名下班级与学生名单，支持设置「新学生注册默认接收班级」、单个添加与 CSV 批量导入'}
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() =>
-            setClassModal({ mode: 'create', name: '', grade: '高一' })
-          }
-          className="h-9 px-4 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5 self-start"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span>新建班级</span>
-        </button>
-      </div>
-
-      {/* Default Registration Routing Status Banner */}
-      <div
-        className={`rounded-xl border px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs ${
-          defaultReg.isDefaultTeacher
-            ? 'bg-teal-50/70 border-teal-200 text-teal-900'
-            : 'bg-white border-slate-200 text-slate-700'
-        }`}
-      >
-        <div className="flex items-center gap-2">
-          <UserCheck
-            className={`w-4 h-4 shrink-0 ${
-              defaultReg.isDefaultTeacher ? 'text-teal-600' : 'text-slate-400'
-            }`}
-          />
-          {defaultReg.isDefaultTeacher ? (
-            <span>
-              <span className="font-semibold">新学生注册默认归属已开启：</span>
-              新自助注册的学生无需填写邀请码，将自动归属到您的「
-              <span className="font-semibold">{defaultReg.defaultClassName}</span>
-              」。
-            </span>
-          ) : (
-            <span>
-              新自助注册的学生当前未默认归属到您名下；点击下方任意班级的「设为默认新生班级」即可自动接收新注册学生。
-            </span>
-          )}
-        </div>
-        {defaultReg.isDefaultTeacher && (
+        {!managed && (
           <button
             type="button"
-            disabled={savingDefault}
-            onClick={() => void handleSetDefaultClass('', false)}
-            className="text-xs text-slate-600 hover:text-slate-900 underline self-start sm:self-center shrink-0"
+            onClick={() =>
+              setClassModal({ mode: 'create', name: '', grade: '高一' })
+            }
+            className="h-9 px-4 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5 self-start"
           >
-            取消默认归属
+            <Plus className="w-3.5 h-3.5" />
+            <span>新建班级</span>
           </button>
         )}
       </div>
+
+      {/* Default Registration Routing Status Banner (local mode) / Platform notice (platform mode) */}
+      {managed ? (
+        <div className="rounded-xl border border-sky-200 bg-sky-50/70 px-4 py-3 flex items-center gap-2 text-xs text-sky-900">
+          <UserCheck className="w-4 h-4 text-sky-600 shrink-0" />
+          <span>
+            平台对接模式：班级与学生名单由个性化学习平台统一管理。如需新建班级、调整学生归属或重置学生密码，请在平台操作；此处仅供查看。
+          </span>
+        </div>
+      ) : (
+        <div
+          className={`rounded-xl border px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs ${
+            defaultReg.isDefaultTeacher
+              ? 'bg-teal-50/70 border-teal-200 text-teal-900'
+              : 'bg-white border-slate-200 text-slate-700'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <UserCheck
+              className={`w-4 h-4 shrink-0 ${
+                defaultReg.isDefaultTeacher
+                  ? 'text-teal-600'
+                  : 'text-slate-400'
+              }`}
+            />
+            {defaultReg.isDefaultTeacher ? (
+              <span>
+                <span className="font-semibold">新学生注册默认归属已开启：</span>
+                新自助注册的学生无需填写邀请码，将自动归属到您的「
+                <span className="font-semibold">
+                  {defaultReg.defaultClassName}
+                </span>
+                」。
+              </span>
+            ) : (
+              <span>
+                新自助注册的学生当前未默认归属到您名下；点击下方任意班级的「设为默认新生班级」即可自动接收新注册学生。
+              </span>
+            )}
+          </div>
+          {defaultReg.isDefaultTeacher && (
+            <button
+              type="button"
+              disabled={savingDefault}
+              onClick={() => void handleSetDefaultClass('', false)}
+              className="text-xs text-slate-600 hover:text-slate-900 underline self-start sm:self-center shrink-0"
+            >
+              取消默认归属
+            </button>
+          )}
+        </div>
+      )}
 
       {msg && (
         <div className="p-3 rounded-lg bg-teal-50 border border-teal-200 text-xs text-teal-800">
@@ -414,47 +435,51 @@ export default function TeacherClassesTab() {
                     学生人数：{cls.studentCount} 人
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setClassModal({
-                      mode: 'edit',
-                      id: cls.id,
-                      name: cls.name,
-                      grade: cls.grade,
-                    });
-                  }}
-                  className="text-xs text-sky-700 hover:underline"
-                >
-                  编辑
-                </button>
-              </div>
-
-              <div className="pt-2 border-t border-slate-200/70 flex items-center justify-between text-xs">
-                {cls.isDefaultRegistration ? (
-                  <span className="inline-flex items-center gap-1 font-semibold text-teal-700">
-                    <UserCheck className="w-3.5 h-3.5" />
-                    <span>默认接收新注册学生</span>
-                  </span>
-                ) : (
-                  <span className="text-slate-400">普通班级</span>
-                )}
-
-                {!cls.isDefaultRegistration && (
+                {!managed && (
                   <button
                     type="button"
-                    disabled={savingDefault}
                     onClick={(e) => {
                       e.stopPropagation();
-                      void handleSetDefaultClass(cls.id, true);
+                      setClassModal({
+                        mode: 'edit',
+                        id: cls.id,
+                        name: cls.name,
+                        grade: cls.grade,
+                      });
                     }}
-                    className="text-sky-700 hover:underline font-medium"
+                    className="text-xs text-sky-700 hover:underline"
                   >
-                    设为默认新生班级
+                    编辑
                   </button>
                 )}
               </div>
+
+              {!managed && (
+                <div className="pt-2 border-t border-slate-200/70 flex items-center justify-between text-xs">
+                  {cls.isDefaultRegistration ? (
+                    <span className="inline-flex items-center gap-1 font-semibold text-teal-700">
+                      <UserCheck className="w-3.5 h-3.5" />
+                      <span>默认接收新注册学生</span>
+                    </span>
+                  ) : (
+                    <span className="text-slate-400">普通班级</span>
+                  )}
+
+                  {!cls.isDefaultRegistration && (
+                    <button
+                      type="button"
+                      disabled={savingDefault}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleSetDefaultClass(cls.id, true);
+                      }}
+                      className="text-sky-700 hover:underline font-medium"
+                    >
+                      设为默认新生班级
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}
@@ -490,29 +515,35 @@ export default function TeacherClassesTab() {
                 </button>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setAddStudentOpen(true)}
-                className="h-8 px-3 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-medium inline-flex items-center gap-1"
-              >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span>添加学生</span>
-              </button>
+              {!managed && (
+                <button
+                  type="button"
+                  onClick={() => setAddStudentOpen(true)}
+                  className="h-8 px-3 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-medium inline-flex items-center gap-1"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>添加学生</span>
+                </button>
+              )}
 
-              <button
-                type="button"
-                onClick={() => setCsvModalOpen(true)}
-                className="h-8 px-3 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 rounded-lg font-medium inline-flex items-center gap-1"
-              >
-                <Upload className="w-3.5 h-3.5" />
-                <span>CSV 批量导入</span>
-              </button>
+              {!managed && (
+                <button
+                  type="button"
+                  onClick={() => setCsvModalOpen(true)}
+                  className="h-8 px-3 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 rounded-lg font-medium inline-flex items-center gap-1"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>CSV 批量导入</span>
+                </button>
+              )}
             </div>
           </div>
 
           {students.length === 0 ? (
             <div className="py-10 text-center text-xs text-slate-500">
-              当前班级暂无学生，可点击上方按钮直接添加或导入，或将该班级设为「默认新生班级」以自动接收学生自助注册。
+              {managed
+                ? '当前班级暂无学生。请老师在个性化学习平台中把学生加入班级，同步后这里即可看到名单。'
+                : '当前班级暂无学生，可点击上方按钮直接添加或导入，或将该班级设为「默认新生班级」以自动接收学生自助注册。'}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -554,25 +585,31 @@ export default function TeacherClassesTab() {
                         {new Date(st.createdAt).toLocaleDateString('zh-CN')}
                       </td>
                       <td className="py-3 px-3 text-right space-x-3 whitespace-nowrap">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setResetTarget(st);
-                            setNewPwd('');
-                          }}
-                          className="text-sky-700 hover:underline inline-flex items-center gap-0.5"
-                        >
-                          <KeyRound className="w-3 h-3" />
-                          <span>重置密码</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void handleRemoveStudent(st)}
-                          className="text-red-600 hover:underline inline-flex items-center gap-0.5"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                          <span>移出班级</span>
-                        </button>
+                        {!managed ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setResetTarget(st);
+                                setNewPwd('');
+                              }}
+                              className="text-sky-700 hover:underline inline-flex items-center gap-0.5"
+                            >
+                              <KeyRound className="w-3 h-3" />
+                              <span>重置密码</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleRemoveStudent(st)}
+                              className="text-red-600 hover:underline inline-flex items-center gap-0.5"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              <span>移出班级</span>
+                            </button>
+                          </>
+                        ) : (
+                          <span className="text-slate-300">-</span>
+                        )}
                       </td>
                     </tr>
                   ))}

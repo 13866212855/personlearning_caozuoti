@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>进入操作题系统</title>
+<style>
+  body { margin: 0; font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif; background: #f1f5f9; color: #0f172a; }
+  .box { max-width: 440px; margin: 12vh auto 0; padding: 28px 24px; background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; text-align: center; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  p { font-size: 14px; line-height: 1.8; color: #475569; margin: 0 0 16px; }
+  .btn { display: inline-block; margin: 4px; padding: 10px 18px; background: #0d9488; color: #fff; text-decoration: none; border-radius: 8px; font-size: 14px; }
+  .btn.secondary { background: #fff; color: #334155; border: 1px solid #cbd5e1; }
+  .links { display: none; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>高中信息技术会考 · 操作题系统</h1>
+  <p id="msg">正在使用个性化学习平台账号进入，请稍候...</p>
+  <p id="links" class="links">
+    <a class="btn" href="/">先登录个性化学习平台</a>
+    <a class="btn secondary" id="direct" href="/login">用账号密码登录操作题系统</a>
+  </p>
+</div>
+<script>
+(function () {
+  // 操作题系统在教师机上的端口
+  var CAOZUOTI_PORT = 7901;
+  // 个性化学习平台学生端把登录凭证存在 localStorage 的 token 键里
+  var TOKEN_KEY = 'token';
+
+  var token = '';
+  try {
+    token = window.localStorage.getItem(TOKEN_KEY) || '';
+  } catch (e) {
+    token = '';
+  }
+
+  // 平台与操作题系统都按当前访问的主机名访问，端口不同
+  var base = 'http://' + (window.location.hostname || '192.168.123.3') + ':' + CAOZUOTI_PORT;
+
+  if (token) {
+    // 凭证放在 # 后面，浏览器不会把它发给服务器；操作题系统读出后会立刻清掉地址栏
+    window.location.replace(base + '/sso#t=' + encodeURIComponent(token));
+    return;
+  }
+
+  document.getElementById('msg').innerHTML =
+    '还没有登录个性化学习平台，或者登录已过期。<br>请先登录平台，再从平台入口进入操作题系统。';
+  document.getElementById('direct').href = base + '/login';
+  document.getElementById('links').style.display = 'block';
+})();
+</script>
+</body>
+</html>

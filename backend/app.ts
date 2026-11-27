@@ -57,7 +57,11 @@ export function createExpressApiApp() {
   });
 
   app.get('/api/health', (_req, res) => {
-    res.json({ status: 'ok', time: new Date().toISOString() });
+    res.json({
+      status: 'ok',
+      time: new Date().toISOString(),
+      authMode: APP_CONFIG.platform.authMode,
+    });
   });
 
   app.use('/api/auth', authRoutes);

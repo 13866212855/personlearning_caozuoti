@@ -9,6 +9,8 @@ export interface PortalJwtPayload {
   sub: string;
   username: string;
   role: 'teacher' | 'student';
+  /** 平台对接模式下绑定的平台用户编号；令牌必须与镜像行上的绑定一致 */
+  pid?: number;
 }
 
 export interface AdminJwtPayload {
@@ -121,6 +123,8 @@ interface UserDbRow {
   class_id: string;
   is_disabled: number;
   must_change_password: number;
+  platform_user_id: number | null;
+  platform_status: string;
 }
 
 function verifyPortalUser(
@@ -149,7 +153,8 @@ function verifyPortalUser(
     const row = db
       .prepare(
         `SELECT id, username, role, real_name, grade, class_name, student_no,
-                teacher_id, class_id, is_disabled, must_change_password
+                teacher_id, class_id, is_disabled, must_change_password,
+                platform_user_id, platform_status
          FROM users WHERE id = ?`
       )
       .get(decoded.sub) as UserDbRow | undefined;
@@ -169,6 +174,17 @@ function verifyPortalUser(
     if (!allowedRoles.includes(row.role)) {
       res.status(403).json({ error: '无权访问该角色功能' });
       return null;
+    }
+    if (APP_CONFIG.platform.authMode === 'platform') {
+      // 平台对接模式：令牌必须绑定到该账号的平台身份，且该平台账号未被注销
+      if (row.platform_status === 'deleted') {
+        res.status(401).json({ error: '账号已在个性化学习平台注销' });
+        return null;
+      }
+      if (!row.platform_user_id || decoded.pid !== row.platform_user_id) {
+        res.status(401).json({ error: '登录已失效，请重新登录' });
+        return null;
+      }
     }
 
     const user: PortalUser = {

@@ -21,6 +21,7 @@ import TeacherExamsTab from '@/components/teacher/TeacherExamsTab';
 import TeacherOverviewTab from '@/components/teacher/TeacherOverviewTab';
 import TeacherQuestionStudioTab from '@/components/teacher/TeacherQuestionStudioTab';
 import TeacherSettingsTab from '@/components/teacher/TeacherSettingsTab';
+import { useAuthConfig } from '@/hooks/useAuthConfig';
 import {
   clearPortalToken,
   getCachedPortalUser,
@@ -47,6 +48,7 @@ export default function TeacherWorkbenchPage() {
     undefined
   );
   const [dismissPwdBanner, setDismissPwdBanner] = useState(false);
+  const auth = useAuthConfig();
 
   useEffect(() => {
     let active = true;
@@ -145,6 +147,14 @@ export default function TeacherWorkbenchPage() {
             <BookOpen className="w-3.5 h-3.5 inline mr-1 text-sky-600" />
             {teacher.realName} 老师（{teacher.username}）
           </span>
+          {auth?.mode === 'platform' && auth.platformWebUrl && (
+            <a
+              href={auth.platformWebUrl}
+              className="text-slate-600 hover:text-sky-700"
+            >
+              返回平台
+            </a>
+          )}
           <button
             type="button"
             onClick={handleLogout}

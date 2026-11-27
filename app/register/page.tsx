@@ -10,6 +10,7 @@ import {
   setPortalToken,
 } from '@/lib/api';
 import type { PortalUser } from '@/lib/types';
+import { useAuthConfig } from '@/hooks/useAuthConfig';
 
 export default function StudentRegisterPage() {
   const router = useRouter();
@@ -23,6 +24,7 @@ export default function StudentRegisterPage() {
   const [status, setStatus] = useState<'idle' | 'submitting' | 'redirecting'>(
     'idle'
   );
+  const auth = useAuthConfig();
 
   // Preload home page route chunk so post-registration navigation is instantaneous
   useEffect(() => {
@@ -81,6 +83,41 @@ export default function StudentRegisterPage() {
       setStatus('idle');
     }
   };
+
+  // 平台对接模式下账号在平台注册，本页只做引导
+  if (auth && !auth.registrationEnabled) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl p-8 space-y-6 text-center">
+          <div className="space-y-2">
+            <div className="w-11 h-11 rounded-xl bg-teal-600 text-white flex items-center justify-center mx-auto">
+              <BookOpen className="w-5 h-5" />
+            </div>
+            <h1 className="text-xl font-bold text-slate-900">
+              账号由个性化学习平台统一管理
+            </h1>
+            <p className="text-sm text-slate-500 leading-relaxed">
+              本系统已接入{auth.platformName}，请使用平台账号登录。
+              还没有平台账号的学生，请先在平台注册。
+            </p>
+          </div>
+          {(auth.platformRegisterUrl || auth.platformWebUrl) && (
+            <a
+              href={auth.platformRegisterUrl || auth.platformWebUrl}
+              className="w-full h-10 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg text-sm flex items-center justify-center"
+            >
+              去{auth.platformName}注册
+            </a>
+          )}
+          <div className="text-center text-sm text-slate-600 pt-2 border-t border-slate-100">
+            <Link href="/login" className="text-sky-700 font-medium hover:underline">
+              返回登录
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">

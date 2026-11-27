@@ -8,6 +8,7 @@ import {
   ClipboardList,
   Database,
   FileCheck2,
+  Globe,
   KeyRound,
   LayoutDashboard,
   Loader2,
@@ -20,9 +21,11 @@ import AdminLlmConfigTab from '@/components/admin/AdminLlmConfigTab';
 import AdminLogsTab from '@/components/admin/AdminLogsTab';
 import AdminOverviewTab from '@/components/admin/AdminOverviewTab';
 import AdminPasswordTab from '@/components/admin/AdminPasswordTab';
+import AdminPlatformTab from '@/components/admin/AdminPlatformTab';
 import AdminQuestionsTab from '@/components/admin/AdminQuestionsTab';
 import AdminSubmissionsTab from '@/components/admin/AdminSubmissionsTab';
 import AdminUsersTab from '@/components/admin/AdminUsersTab';
+import { useAuthConfig } from '@/hooks/useAuthConfig';
 import {
   adminFetch,
   clearAdminToken,
@@ -33,6 +36,7 @@ import {
 type AdminTab =
   | 'overview'
   | 'users'
+  | 'platform'
   | 'exams'
   | 'llm'
   | 'questions'
@@ -55,6 +59,8 @@ export default function AdminPortalPage() {
 
   const [activeTab, setActiveTab] = useState<AdminTab>('overview');
   const [dismissPwdBanner, setDismissPwdBanner] = useState(false);
+  const auth = useAuthConfig();
+  const platformMode = auth?.mode === 'platform';
 
   useEffect(() => {
     const token = getAdminToken();
@@ -175,6 +181,9 @@ export default function AdminPortalPage() {
     [
       { id: 'overview', label: '数据概览', icon: LayoutDashboard },
       { id: 'users', label: '用户与角色', icon: Users },
+      ...(platformMode
+        ? [{ id: 'platform' as AdminTab, label: '平台对接', icon: Globe }]
+        : []),
       { id: 'exams', label: '全局考试监控', icon: ClipboardList },
       { id: 'llm', label: '大模型配置', icon: Bot },
       { id: 'questions', label: '全局题库', icon: Database },
@@ -259,6 +268,7 @@ export default function AdminPortalPage() {
         <main className="flex-1 p-5 sm:p-7 min-w-0">
           {activeTab === 'overview' && <AdminOverviewTab />}
           {activeTab === 'users' && <AdminUsersTab />}
+          {activeTab === 'platform' && <AdminPlatformTab />}
           {activeTab === 'exams' && <AdminExamsTab />}
           {activeTab === 'llm' && <AdminLlmConfigTab />}
           {activeTab === 'questions' && <AdminQuestionsTab />}

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { AlertTriangle, Bell, BookOpen, LogOut } from 'lucide-react';
 import { clearPortalToken, portalFetch } from '@/lib/api';
+import { useAuthConfig } from '@/hooks/useAuthConfig';
 import type { PortalUser } from '@/lib/types';
 
 interface StudentHeaderProps {
@@ -15,6 +16,8 @@ export default function StudentHeader({ user }: StudentHeaderProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [dismissPwdBanner, setDismissPwdBanner] = useState(false);
+  const auth = useAuthConfig();
+  const platformMode = auth?.mode === 'platform';
 
   const handleLogout = async () => {
     try {
@@ -89,6 +92,15 @@ export default function StudentHeader({ user }: StudentHeaderProps) {
               {user.realName} · {user.grade} {user.className}
             </span>
 
+            {platformMode && auth.platformWebUrl && (
+              <a
+                href={auth.platformWebUrl}
+                className="hidden sm:inline text-sm text-slate-600 hover:text-sky-700 whitespace-nowrap shrink-0"
+              >
+                返回平台
+              </a>
+            )}
+
             <button
               type="button"
               onClick={handleLogout}
@@ -148,6 +160,16 @@ export default function StudentHeader({ user }: StudentHeaderProps) {
                 稍后提醒
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {!user.classId && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 sm:px-6 py-2 text-xs text-amber-900">
+          <div className="max-w-[1440px] mx-auto">
+            {platformMode
+              ? '你还没有加入班级，暂时看不到面向班级的考试。请联系老师在个性化学习平台中把你加入班级。'
+              : '你还没有加入班级，暂时看不到面向班级的考试，请联系任课教师。'}
           </div>
         </div>
       )}
