@@ -3,8 +3,10 @@
 import { useEffect, useRef } from 'react';
 import { Redo2, Undo2, X } from 'lucide-react';
 import type {
+  DatabaseState,
   ExcelState,
   FileState,
+  PythonState,
   QuestionAsset,
   QuestionType,
   SimulatorState,
@@ -16,6 +18,8 @@ import WordSimulator from './WordSimulator';
 import ExcelSimulator from './ExcelSimulator';
 import WebSimulator from './WebSimulator';
 import FileManagerSimulator from './FileManagerSimulator';
+import PythonSimulator from './PythonSimulator';
+import DatabaseSimulator from './DatabaseSimulator';
 
 interface SimulatorRendererProps {
   type: QuestionType;
@@ -132,6 +136,26 @@ export default function SimulatorRenderer({
           value={value as WebState}
           onChange={simOnChange}
           assets={assets}
+          readOnly={readOnly}
+        />
+      );
+    }
+    if (type === 'python') {
+      return (
+        <PythonSimulator
+          key={innerKey}
+          value={value as PythonState}
+          onChange={simOnChange}
+          readOnly={readOnly}
+        />
+      );
+    }
+    if (type === 'database') {
+      return (
+        <DatabaseSimulator
+          key={innerKey}
+          value={value as DatabaseState}
+          onChange={simOnChange}
           readOnly={readOnly}
         />
       );

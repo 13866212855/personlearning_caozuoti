@@ -303,6 +303,8 @@ export default function AdminQuestionsTab() {
           <option value="excel">Excel 电子表格</option>
           <option value="web">网页制作</option>
           <option value="file">文件管理</option>
+          <option value="python">Python 程序设计</option>
+          <option value="database">数据库与 SQL 查询</option>
         </select>
         <select
           value={diffFilter}
@@ -473,6 +475,8 @@ export default function AdminQuestionsTab() {
                     <option value="excel">Excel 电子表格</option>
                     <option value="web">网页制作</option>
                     <option value="file">文件管理</option>
+                    <option value="python">Python 程序设计</option>
+                    <option value="database">数据库与 SQL 查询</option>
                   </select>
                 </label>
                 <label className="space-y-1">

@@ -1,9 +1,12 @@
 import type {
   Checkpoint,
   CheckpointResult,
+  DatabaseState,
   ExcelState,
   FileState,
   GradeResult,
+  PythonState,
+  QuestionType,
   SimulatorState,
   WebState,
   WordState,
@@ -13,6 +16,8 @@ import {
   expandRange,
   normalizeFormula,
 } from '../utils/excelFormula';
+import { checkPythonSyntax, runPythonTestCases } from '../utils/pythonRunner';
+import { runSqlInMemory } from '../utils/sqlRunner';
 
 function normalizePath(p: string): string {
   return p
@@ -748,8 +753,265 @@ function gradeFileCheckpoint(
   };
 }
 
+function gradePythonCheckpoint(
+  cp: Checkpoint,
+  state: PythonState
+): CheckpointResult {
+  const p = cp.params || {};
+  const code = String(state?.code || '');
+  let passed = false;
+  let feedback = '';
+
+  switch (cp.ruleType) {
+    case 'python_syntax_valid': {
+      const check = checkPythonSyntax(code);
+      passed = check.valid;
+      feedback = passed
+        ? 'Python 代码语法检查通过。'
+        : check.error || 'Python 代码存在语法错误。';
+      break;
+    }
+
+    case 'python_code_contains': {
+      const pattern = String(p.pattern || '');
+      const patterns = Array.isArray(p.patterns)
+        ? p.patterns.map((x) => String(x))
+        : pattern
+          ? [pattern]
+          : [];
+      if (patterns.length === 0) {
+        passed = code.trim().length > 0;
+        feedback = passed ? '已编写代码内容。' : '尚未编写 Python 代码。';
+        break;
+      }
+      if (p.isRegex) {
+        passed = patterns.every((pat) => new RegExp(pat, 'm').test(code));
+      } else if (p.matchAny) {
+        passed = patterns.some((pat) => code.includes(pat));
+      } else {
+        passed = patterns.every((pat) => code.includes(pat));
+      }
+      feedback = passed
+        ? '代码结构与关键语句符合题目要求。'
+        : `代码中缺少必要的关键结构或语句（需包含：${patterns.join(p.matchAny ? ' 或 ' : '、')}）。`;
+      break;
+    }
+
+    case 'python_test_cases': {
+      const rawCases = Array.isArray(p.cases)
+        ? (p.cases as Array<{
+            stdin?: string;
+            expectedOutput?: string;
+            contains?: string;
+          }>)
+        : [];
+      if (rawCases.length === 0) {
+        feedback = '判分规则缺少测试用例配置。';
+        break;
+      }
+      const suite = runPythonTestCases(code, rawCases);
+      if (suite.blockedReason || suite.error) {
+        passed = false;
+        feedback = suite.blockedReason || suite.error || '测试运行失败。';
+        break;
+      }
+      const passCount = suite.results.filter((r) => r.passed).length;
+      passed = passCount === rawCases.length;
+      if (passed) {
+        feedback = `全部 ${rawCases.length} 组测试样例运行通过！`;
+      } else {
+        const firstFail = suite.results.find((r) => !r.passed);
+        if (firstFail?.error) {
+          feedback = `第 ${firstFail.index + 1} 组测试运行报错：${firstFail.error}`;
+        } else if (firstFail) {
+          const expStr =
+            firstFail.expectedOutput !== undefined
+              ? `，期望输出「${firstFail.expectedOutput}」`
+              : '';
+          feedback = `测试通过 ${passCount}/${rawCases.length} 组：第 ${firstFail.index + 1} 组实际输出「${firstFail.actualOutput || '(无输出)'}」${expStr}。`;
+        } else {
+          feedback = `仅通过 ${passCount}/${rawCases.length} 组测试样例。`;
+        }
+      }
+      break;
+    }
+
+    default:
+      feedback = `未知的 Python 判分规则: ${cp.ruleType}`;
+  }
+
+  return {
+    checkpointId: cp.id,
+    stepIndex: cp.stepIndex,
+    description: cp.description,
+    maxScore: cp.score,
+    earnedScore: passed ? cp.score : 0,
+    passed,
+    feedback,
+  };
+}
+
+function normalizeSqlCell(v: unknown): string {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'number') {
+    return Number.isInteger(v) ? String(v) : String(Number(v.toFixed(4)));
+  }
+  return String(v).trim();
+}
+
+function gradeDatabaseCheckpoint(
+  cp: Checkpoint,
+  state: DatabaseState
+): CheckpointResult {
+  const p = cp.params || {};
+  const sql = String(state?.sql || '');
+  const tables = state?.tables || [];
+  let passed = false;
+  let feedback = '';
+
+  switch (cp.ruleType) {
+    case 'sql_code_contains': {
+      const pattern = String(p.pattern || '');
+      const patterns = Array.isArray(p.patterns)
+        ? p.patterns.map((x) => String(x))
+        : pattern
+          ? [pattern]
+          : [];
+      const normSql = sql.toLowerCase();
+      if (patterns.length === 0) {
+        passed = normSql.trim().length > 0;
+      } else if (p.isRegex) {
+        passed = patterns.every((pat) => new RegExp(pat, 'i').test(sql));
+      } else {
+        passed = patterns.every((pat) => normSql.includes(pat.toLowerCase()));
+      }
+      feedback = passed
+        ? 'SQL 语句关键字与结构符合要求。'
+        : `SQL 语句缺少必要的关键字或条件（需包含：${patterns.join('、')}）。`;
+      break;
+    }
+
+    case 'sql_query_result': {
+      const execRes = runSqlInMemory(tables, sql);
+      if (!execRes.ok) {
+        feedback = execRes.error || 'SQL 执行失败。';
+        break;
+      }
+      if (execRes.columns.length === 0) {
+        feedback = '当前 SQL 未产生查询结果集，请确认末尾包含 SELECT 查询语句。';
+        break;
+      }
+      const expectedCols = Array.isArray(p.expectedColumns)
+        ? p.expectedColumns.map((c) => String(c).trim().toLowerCase())
+        : null;
+      const actualCols = execRes.columns.map((c) => c.trim().toLowerCase());
+      if (expectedCols) {
+        const colsOk =
+          expectedCols.length === actualCols.length &&
+          expectedCols.every((c, idx) => c === actualCols[idx]);
+        if (!colsOk) {
+          feedback = `查询结果列名为 [${execRes.columns.join(', ')}]，期望为 [${(p.expectedColumns as string[]).join(', ')}]。`;
+          break;
+        }
+      }
+
+      const expectedRows = Array.isArray(p.expectedRows)
+        ? (p.expectedRows as Array<Array<string | number | null>>)
+        : null;
+      if (expectedRows) {
+        const normExpected = expectedRows.map((r) => r.map(normalizeSqlCell));
+        const normActual = execRes.rows.map((r) => r.map(normalizeSqlCell));
+        const ignoreOrder = Boolean(p.ignoreOrder);
+        const rowKey = (r: string[]) => r.join('||');
+        let rowsOk = normExpected.length === normActual.length;
+        if (rowsOk) {
+          if (ignoreOrder) {
+            const setA = normActual.map(rowKey).sort();
+            const setE = normExpected.map(rowKey).sort();
+            rowsOk = setA.every((k, i) => k === setE[i]);
+          } else {
+            rowsOk = normActual.every((r, i) => rowKey(r) === rowKey(normExpected[i]));
+          }
+        }
+        if (!rowsOk) {
+          feedback = `查询返回 ${execRes.rows.length} 行数据，与期望结果（${expectedRows.length} 行）不完全一致，请检查筛选或排序条件。`;
+          break;
+        }
+      } else if (typeof p.minRows === 'number' && execRes.rows.length < p.minRows) {
+        feedback = `查询至少应返回 ${p.minRows} 行数据，当前仅 ${execRes.rows.length} 行。`;
+        break;
+      }
+
+      passed = true;
+      feedback = `SQL 查询执行正确，共返回 ${execRes.rows.length} 行匹配结果。`;
+      break;
+    }
+
+    case 'sql_table_state': {
+      const execRes = runSqlInMemory(tables, sql);
+      if (!execRes.ok) {
+        feedback = execRes.error || 'SQL 执行失败。';
+        break;
+      }
+      const tableName = String(p.tableName || '').trim().toLowerCase();
+      const targetTable = execRes.updatedTables.find(
+        (t) => t.name.toLowerCase() === tableName
+      );
+      if (!targetTable) {
+        feedback = `未找到目标数据表「${p.tableName}」。`;
+        break;
+      }
+      if (typeof p.expectedRowCount === 'number' && targetTable.rows.length !== p.expectedRowCount) {
+        feedback = `数据表「${targetTable.name}」当前有 ${targetTable.rows.length} 条记录，期望为 ${p.expectedRowCount} 条。`;
+        break;
+      }
+      const rowChecks = Array.isArray(p.rowContains)
+        ? (p.rowContains as Array<Array<string | number | null>>)
+        : [];
+      const rowKeys = new Set(
+        targetTable.rows.map((r) => r.map(normalizeSqlCell).join('||'))
+      );
+      const missingRow = rowChecks.find(
+        (rc) => !rowKeys.has(rc.map(normalizeSqlCell).join('||'))
+      );
+      if (missingRow) {
+        feedback = `数据表「${targetTable.name}」中未检测到目标记录 [${missingRow.join(', ')}]。`;
+        break;
+      }
+
+      const notContains = Array.isArray(p.rowNotContains)
+        ? (p.rowNotContains as Array<Array<string | number | null>>)
+        : [];
+      const stillPresent = notContains.find((rc) =>
+        rowKeys.has(rc.map(normalizeSqlCell).join('||'))
+      );
+      if (stillPresent) {
+        feedback = `数据表「${targetTable.name}」中仍存在应被删除或修改的记录 [${stillPresent.join(', ')}]。`;
+        break;
+      }
+
+      passed = true;
+      feedback = `数据表「${targetTable.name}」更新状态验证通过。`;
+      break;
+    }
+
+    default:
+      feedback = `未知的数据库判分规则: ${cp.ruleType}`;
+  }
+
+  return {
+    checkpointId: cp.id,
+    stepIndex: cp.stepIndex,
+    description: cp.description,
+    maxScore: cp.score,
+    earnedScore: passed ? cp.score : 0,
+    passed,
+    feedback,
+  };
+}
+
 export function gradeAnswerDeterministic(
-  type: 'word' | 'excel' | 'web' | 'file',
+  type: QuestionType,
   checkpoints: Checkpoint[],
   answer: SimulatorState
 ): GradeResult {
@@ -766,6 +1028,10 @@ export function gradeAnswerDeterministic(
       res = gradeExcelCheckpoint(cp, answer as ExcelState);
     } else if (type === 'web') {
       res = gradeWebCheckpoint(cp, answer as WebState);
+    } else if (type === 'python') {
+      res = gradePythonCheckpoint(cp, answer as PythonState);
+    } else if (type === 'database') {
+      res = gradeDatabaseCheckpoint(cp, answer as DatabaseState);
     } else {
       res = gradeFileCheckpoint(cp, answer as FileState);
     }

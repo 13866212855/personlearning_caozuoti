@@ -38,6 +38,72 @@ interface PreviewQuestion extends FullQuestion {
   localId: string;
 }
 
+const ANHUI_KP_PRESETS: Record<
+  QuestionType,
+  Array<{ label: string; kpIds: string[] }>
+> = {
+  word: [
+    {
+      label: '会考高频：图文混排综合',
+      kpIds: ['kp-word-1', 'kp-word-7', 'kp-word-8', 'kp-word-9', 'kp-word-3', 'kp-word-5'],
+    },
+    {
+      label: '会考高频：表格与页面版式',
+      kpIds: ['kp-word-1', 'kp-word-2', 'kp-word-4', 'kp-word-6'],
+    },
+  ],
+  excel: [
+    {
+      label: '会考高频：函数计算与排名',
+      kpIds: ['kp-excel-7', 'kp-excel-4', 'kp-excel-1', 'kp-excel-11', 'kp-excel-6'],
+    },
+    {
+      label: '会考高频：统计排序筛选图表',
+      kpIds: ['kp-excel-8', 'kp-excel-10', 'kp-excel-2', 'kp-excel-14', 'kp-excel-3'],
+    },
+  ],
+  web: [
+    {
+      label: '会考高频：图文超链接网页',
+      kpIds: ['kp-web-7', 'kp-web-1', 'kp-web-8', 'kp-web-2', 'kp-web-12'],
+    },
+    {
+      label: '会考高频：CSS样式与表格列表',
+      kpIds: ['kp-web-6', 'kp-web-9', 'kp-web-3', 'kp-web-5', 'kp-web-11', 'kp-web-13'],
+    },
+  ],
+  file: [
+    {
+      label: '会考高频：目录分类与移动重命名',
+      kpIds: ['kp-file-1', 'kp-file-6', 'kp-file-7', 'kp-file-8'],
+    },
+    {
+      label: '会考高频：复制、快捷方式与属性',
+      kpIds: ['kp-file-2', 'kp-file-3', 'kp-file-5', 'kp-file-10'],
+    },
+  ],
+  python: [
+    {
+      label: '新课标高频：输入输出与分支循环',
+      kpIds: ['kp-python-1', 'kp-python-2', 'kp-python-4', 'kp-python-5'],
+    },
+    {
+      label: '新课标高频：列表统计与函数算法',
+      kpIds: ['kp-python-7', 'kp-python-8', 'kp-python-10', 'kp-python-11'],
+    },
+  ],
+  database: [
+    {
+      label: '会考高频：SELECT 筛选排序查询',
+      kpIds: ['kp-db-1', 'kp-db-2', 'kp-db-3'],
+    },
+    {
+      label: '会考高频：统计聚合与增删改',
+      kpIds: ['kp-db-4', 'kp-db-5', 'kp-db-6', 'kp-db-7'],
+    },
+  ],
+};
+
 export default function TeacherQuestionStudioTab() {
   const [subTab, setSubTab] = useState<'ai' | 'bank'>('ai');
   const [msg, setMsg] = useState('');
@@ -47,6 +113,7 @@ export default function TeacherQuestionStudioTab() {
   const [kps, setKps] = useState<KnowledgePointItem[]>([]);
   const [quota, setQuota] = useState({ used: 0, limit: 30, remaining: 30 });
   const [selectedKpIds, setSelectedKpIds] = useState<string[]>([]);
+  const [kpFilter, setKpFilter] = useState('');
   const [newKpChapter, setNewKpChapter] = useState('教师自定义');
   const [newKpName, setNewKpName] = useState('');
   const [addingKp, setAddingKp] = useState(false);
@@ -148,7 +215,14 @@ export default function TeacherQuestionStudioTab() {
       .then(([kpRes, ovRes]) => {
         if (!active) return;
         setKps(kpRes.items);
-        if (ovRes.aiQuota) setQuota(ovRes.aiQuota);
+        if (ovRes.aiQuota) {
+          const q = ovRes.aiQuota;
+          setQuota({
+            used: q.used ?? 0,
+            limit: q.limit ?? 30,
+            remaining: q.remaining ?? Math.max(0, (q.limit ?? 30) - (q.used ?? 0)),
+          });
+        }
       })
       .catch(() => {});
     return () => {
@@ -185,20 +259,52 @@ export default function TeacherQuestionStudioTab() {
     };
   }, [subTab, scope, bankType, bankDiff]);
 
+  const kpCountByType = useMemo(() => {
+    const counts: Record<QuestionType, number> = {
+      word: 0,
+      excel: 0,
+      web: 0,
+      file: 0,
+      python: 0,
+      database: 0,
+    };
+    for (const k of kps) {
+      if (k.type in counts) counts[k.type] += 1;
+    }
+    return counts;
+  }, [kps]);
+
+  const currentTypeKps = useMemo(
+    () => kps.filter((k) => k.type === aiType),
+    [kps, aiType]
+  );
+
   const kpsByChapter = useMemo(() => {
-    const filtered = kps.filter((k) => k.type === aiType);
+    const kw = kpFilter.trim().toLowerCase();
+    const filtered = kw
+      ? currentTypeKps.filter(
+          (k) =>
+            k.name.toLowerCase().includes(kw) ||
+            k.chapter.toLowerCase().includes(kw)
+        )
+      : currentTypeKps;
     const groups: Record<string, KnowledgePointItem[]> = {};
     for (const k of filtered) {
       if (!groups[k.chapter]) groups[k.chapter] = [];
       groups[k.chapter].push(k);
     }
     return groups;
-  }, [kps, aiType]);
+  }, [currentTypeKps, kpFilter]);
 
   const toggleKp = (id: string) => {
     setSelectedKpIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
+  };
+
+  const applyPresetKps = (kpIds: string[]) => {
+    const validSet = new Set(currentTypeKps.map((k) => k.id));
+    setSelectedKpIds(kpIds.filter((id) => validSet.has(id)));
   };
 
   const handleAddCustomKp = async () => {
@@ -610,68 +716,122 @@ export default function TeacherQuestionStudioTab() {
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <span className="text-sm font-bold text-slate-900">出题参数设置</span>
               <span className="text-xs font-medium text-teal-700 tabular-nums">
-                今日可用额度：{quota.remaining} / {quota.limit} 题
+                今日可用额度：
+                {quota.remaining ?? Math.max(0, quota.limit - quota.used)} / {quota.limit} 题
               </span>
             </div>
 
             <div className="space-y-1.5">
-              <label className="block font-medium text-slate-700">1. 选择题型</label>
+              <label className="block font-medium text-slate-700">1. 选择题型（高中信息技术会考全 6 类操作模块）</label>
               <div className="grid grid-cols-2 gap-2">
-                {(['word', 'excel', 'web', 'file'] as QuestionType[]).map((t) => (
+                {(['word', 'excel', 'web', 'file', 'python', 'database'] as QuestionType[]).map((t) => (
                   <button
                     key={t}
                     type="button"
                     onClick={() => {
                       setAiType(t);
                       setSelectedKpIds([]);
+                      setKpFilter('');
                     }}
-                    className={`px-3 py-2 rounded-lg border text-left font-medium transition-colors ${
+                    className={`px-3 py-2 rounded-lg border text-left transition-colors ${
                       aiType === t
                         ? 'border-sky-600 bg-sky-50 text-sky-800'
                         : 'border-slate-200 hover:bg-slate-50 text-slate-700'
                     }`}
                   >
-                    {TYPE_LABELS[t]}
+                    <div className="font-medium">{TYPE_LABELS[t]}</div>
+                    <div className="text-[11px] opacity-75 tabular-nums mt-0.5">
+                      涵盖 {kpCountByType[t]} 个会考考点
+                    </div>
                   </button>
                 ))}
               </div>
             </div>
 
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <label className="font-medium text-slate-700">
                   2. 选择考查知识点（可多选）
                 </label>
-                <span className="text-slate-400">已选 {selectedKpIds.length} 项</span>
+                <div className="flex items-center gap-2 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedKpIds(currentTypeKps.map((k) => k.id))}
+                    className="text-sky-700 hover:underline"
+                  >
+                    全选本类
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedKpIds([])}
+                    className="text-slate-500 hover:underline"
+                  >
+                    清空
+                  </button>
+                  <span className="text-slate-500 tabular-nums">
+                    已选 {selectedKpIds.length}/{currentTypeKps.length}
+                  </span>
+                </div>
               </div>
 
-              <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-xl p-3 space-y-3 bg-slate-50/50">
-                {Object.entries(kpsByChapter).map(([chapter, list]) => (
-                  <div key={chapter} className="space-y-1.5">
-                    <div className="text-[11px] font-semibold text-slate-500">
-                      {chapter}
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {list.map((kp) => {
-                        const checked = selectedKpIds.includes(kp.id);
-                        return (
-                          <button
-                            key={kp.id}
-                            type="button"
-                            onClick={() => toggleKp(kp.id)}
-                            className={`px-2.5 py-1 rounded-lg border text-xs transition-colors ${
-                              checked
-                                ? 'bg-sky-600 border-sky-600 text-white'
-                                : 'bg-white border-slate-200 text-slate-700 hover:border-sky-300'
-                            }`}
-                          >
-                            {kp.name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
+              {/* 安徽会考高频考点一键组合 */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {ANHUI_KP_PRESETS[aiType].map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => applyPresetKps(preset.kpIds)}
+                    className="px-2 py-1 rounded-md bg-sky-50 hover:bg-sky-100 border border-sky-200 text-[11px] font-medium text-sky-800 transition-colors"
+                  >
+                    {preset.label}
+                  </button>
                 ))}
+              </div>
+
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                <input
+                  type="text"
+                  value={kpFilter}
+                  onChange={(e) => setKpFilter(e.target.value)}
+                  placeholder="快速筛选本模块会考知识点..."
+                  className="w-full h-8 pl-8 pr-2.5 border border-slate-200 rounded-lg bg-white text-xs"
+                />
+              </div>
+
+              <div className="max-h-72 overflow-y-auto border border-slate-200 rounded-xl p-3 space-y-3 bg-slate-50/50">
+                {Object.entries(kpsByChapter).length === 0 ? (
+                  <div className="text-center text-slate-400 py-4">
+                    未找到匹配的知识点
+                  </div>
+                ) : (
+                  Object.entries(kpsByChapter).map(([chapter, list]) => (
+                    <div key={chapter} className="space-y-1.5">
+                      <div className="text-[11px] font-semibold text-slate-500">
+                        {chapter}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {list.map((kp) => {
+                          const checked = selectedKpIds.includes(kp.id);
+                          return (
+                            <button
+                              key={kp.id}
+                              type="button"
+                              onClick={() => toggleKp(kp.id)}
+                              className={`px-2.5 py-1 rounded-lg border text-xs transition-colors ${
+                                checked
+                                  ? 'bg-sky-600 border-sky-600 text-white'
+                                  : 'bg-white border-slate-200 text-slate-700 hover:border-sky-300'
+                              }`}
+                            >
+                              {kp.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
 
               <div className="flex items-center gap-1.5 pt-1">
@@ -1033,6 +1193,8 @@ export default function TeacherQuestionStudioTab() {
                 <option value="excel">Excel 电子表格</option>
                 <option value="web">网页制作</option>
                 <option value="file">文件与文件夹</option>
+                <option value="python">Python 程序设计</option>
+                <option value="database">数据库与 SQL 查询</option>
               </select>
               <select
                 value={bankDiff}

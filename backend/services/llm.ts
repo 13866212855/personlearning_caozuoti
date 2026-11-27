@@ -36,6 +36,7 @@ export function getLlmConfig(): LlmConfigRow {
 export function getTeacherTodayAiUsage(teacherId: string): {
   used: number;
   limit: number;
+  remaining: number;
 } {
   const db = getDb();
   const cfg = getLlmConfig();
@@ -47,9 +48,12 @@ export function getTeacherTodayAiUsage(teacherId: string): {
        WHERE user_id = ? AND created_at LIKE ?`
     )
     .get(teacherId, `${todayPrefix}%`) as { total: number };
+  const used = Number(row?.total || 0);
+  const limit = Number(cfg.teacher_daily_ai_limit || 30);
   return {
-    used: Number(row?.total || 0),
-    limit: Number(cfg.teacher_daily_ai_limit || 30),
+    used,
+    limit,
+    remaining: Math.max(0, limit - used),
   };
 }
 
@@ -306,18 +310,21 @@ initialState 与 referenceAnswer 的 JSON 结构必须严格为：
     excel: `题型：Excel 电子表格。
 initialState 与 referenceAnswer 的 JSON 结构必须严格为：
 {
-  "cells": { "A1": { "value": "标题", "formula": "", "bold": false, "bgColor": "", "align": "left", "border": false } },
+  "cells": { "A1": { "value": "标题", "formula": "", "bold": false, "bgColor": "", "align": "left", "border": false, "numberFormat": "general" } },
   "merges": ["A1:E1"],
   "charts": [{ "id": "c1", "type": "column", "title": "图表标题", "labelRange": "A2:A5", "dataRange": "C2:C5" }],
-  "sortInfo": { "column": "E", "order": "desc" }
+  "sortInfo": { "column": "E", "order": "desc" },
+  "filterInfo": { "column": "B", "keyword": "高一" }
 }
-支持公式函数：SUM, AVERAGE, MAX, MIN, COUNT, IF, RANK, COUNTIF。
+支持公式函数：SUM, AVERAGE, MAX, MIN, COUNT, COUNTA, IF, RANK, ROUND, COUNTIF，以及四则运算和 $ 绝对引用。
 可用的 ruleType 与 params：
 - "excel_cell_formula": { "cell": "E3", "expectedFormula": "=SUM(B3:D3)", "expectedValue": 270 }
-- "excel_cell_style": { "range": "A1:E1", "bold": true, "bgColor": "#E0F2FE", "border": true, "align": "center" }
+- "excel_cell_value": { "cell": "A1", "expectedValue": "成绩统计表" }
+- "excel_cell_style": { "range": "A1:E1", "bold": true, "bgColor": "#E0F2FE", "border": true, "align": "center", "numberFormat": "number2|percent|currency" }
 - "excel_merge_exists": { "range": "A1:E1" }
-- "excel_chart_exists": { "chartType": "column", "titleContains": "统计", "dataRange": "C2:C5" }
-- "excel_sort_applied": { "column": "E", "order": "desc" }`,
+- "excel_chart_exists": { "chartType": "column|line|pie", "titleContains": "统计", "dataRange": "C2:C5" }
+- "excel_sort_applied": { "column": "E", "order": "desc|asc" }
+- "excel_filter_applied": { "column": "B", "keywordContains": "关键词" }`,
 
     web: `题型：网页制作（HTML/CSS）。
 initialState 与 referenceAnswer 的 JSON 结构必须严格为：
@@ -328,6 +335,7 @@ initialState 与 referenceAnswer 的 JSON 结构必须严格为：
   ]
 }
 可用的 ruleType 与 params：
+- "web_file_exists": { "path": "styles.css" }
 - "web_html_tag": { "file": "index.html", "tag": "h1", "minCount": 1, "textContains": "标题", "attrs": { "alt": true } }
 - "web_css_rule": { "file": "styles.css", "selector": "h1", "property": "text-align", "expectedValue": "center" }
 - "web_code_contains": { "file": "index.html", "pattern": "<ul>" }`,
@@ -341,8 +349,40 @@ initialState 与 referenceAnswer 的 JSON 结构必须严格为：
   ]
 }
 可用的 ruleType 与 params：
-- "file_exists": { "path": "D:/作业/报告.txt", "itemType": "file", "readOnly": true, "hidden": false, "targetPath": "仅shortcut需要" }
+- "file_exists": { "path": "D:/作业/报告.txt", "itemType": "file|folder|shortcut", "readOnly": true, "hidden": false, "targetPath": "仅shortcut需要" }
 - "file_not_exists": { "path": "D:/旧文件.tmp" }`,
+
+    python: `题型：Python 程序设计（新课标《数据与计算》）。
+initialState 与 referenceAnswer 的 JSON 结构必须严格为：
+{
+  "code": "# 初始代码模板或完整参考代码\\n",
+  "customInput": "示例标准输入内容（无输入可留空字符串）",
+  "lastOutput": "",
+  "lastError": ""
+}
+重要约定：不要使用 os/sys/subprocess/open/eval/exec；如使用 input()，括号内不要加中文提示字符串（直接写 input()），以便精确比对 stdout。
+可用的 ruleType 与 params：
+- "python_syntax_valid": {}（检查语法正确）
+- "python_code_contains": { "patterns": ["for ", "if "], "matchAny": false, "isRegex": false }
+- "python_test_cases": { "cases": [{ "stdin": "输入样例1", "expectedOutput": "精确期望输出1" }, { "stdin": "输入样例2", "expectedOutput": "精确期望输出2" }] }（至少提供 2 组不同测试用例，确保参考答案全部运行通过！）`,
+
+    database: `题型：数据库与 SQL 查询（基于 SQLite 内存库）。
+initialState 与 referenceAnswer 的 JSON 结构必须严格为：
+{
+  "tables": [
+    { "name": "表名", "columns": ["id", "name", "score"], "rows": [[1, "张三", 92], [2, "李四", 85]] }
+  ],
+  "sql": "-- 初始注释或完整参考 SQL 语句\\n",
+  "lastColumns": [],
+  "lastRows": [],
+  "lastChanges": 0,
+  "lastError": ""
+}
+注意：referenceAnswer 的 tables 必须与 initialState 的 tables 保持相同初始结构（判分器会在 initialState 的 tables 上重新执行 referenceAnswer.sql 来检查结果或表状态）。
+可用的 ruleType 与 params：
+- "sql_code_contains": { "patterns": ["SELECT", "WHERE", "ORDER BY"], "isRegex": false }
+- "sql_query_result": { "expectedColumns": ["name", "score"], "expectedRows": [["张三", 92]], "ignoreOrder": false }
+- "sql_table_state": { "tableName": "表名", "expectedRowCount": 3, "rowContains": [[3, "王五", 88]], "rowNotContains": [] }`,
   };
 
   const kpLine =

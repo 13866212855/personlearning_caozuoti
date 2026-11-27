@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Database,
   FileCode2,
   FileSpreadsheet,
   FileText,
@@ -16,6 +17,7 @@ import {
   Pause,
   Play,
   RotateCcw,
+  Terminal,
 } from 'lucide-react';
 import type { QuestionType } from '@/lib/types';
 
@@ -57,6 +59,19 @@ interface DemoFrame {
     filesInDir?: Array<{ name: string; kind: 'folder' | 'file' | 'shortcut'; badge?: string }>;
     clipboardNotice?: string;
     propsModal?: boolean;
+    // Python
+    pyCode?: string;
+    pyStdin?: string;
+    pyStdout?: string;
+    pyBadge?: string;
+    // Database / SQL
+    sqlText?: string;
+    sqlTableName?: string;
+    sqlTableCols?: string[];
+    sqlTableRows?: Array<Array<string | number>>;
+    sqlResultCols?: string[];
+    sqlResultRows?: Array<Array<string | number>>;
+    sqlActionNote?: string;
   };
 }
 
@@ -654,6 +669,246 @@ export const GUIDE_TOPICS: GuideTopicConfig[] = [
       },
     ],
   },
+
+  // ================= PYTHON =================
+  {
+    id: 'python_io',
+    category: 'python',
+    label: 'Python 程序设计：输入转换与格式化输出',
+    summary: '先用 input() 读取标准输入并转成 int / float，再按题目格式用 print() 输出结果。',
+    pitfall: 'input() 读到的永远是字符串！参与数值计算前必须用 int() 或 float() 转换；输入括号与引号均须为英文半角。',
+    frames: [
+      {
+        title: '第 1 步：读取输入并转换数据类型',
+        actionText: '用 n = int(input()) 读入整数，或在下方「标准输入」框填好测试数据后再写代码。',
+        highlightControl: 'py_editor',
+        tip: '如果 input() 里写了中文提示语，可能混入输出文本中导致判分不一致，考试题通常直接写 input()。',
+        stageState: {
+          pyCode: 'n = int(input())\nscores = [int(input()) for _ in range(n)]',
+          pyStdin: '3\n85\n92\n78',
+          pyStdout: '',
+          pyBadge: '读取输入',
+        },
+      },
+      {
+        title: '第 2 步：点击「运行代码」核对输出格式',
+        actionText: '使用 print() 输出计算结果（如需保留两位小数可用 f"{avg:.2f}"），点工具栏「运行代码」检查右下方输出。',
+        highlightControl: 'btn_py_run',
+        tip: '每做完一小段就点一次「运行代码」，确保没有 SyntaxError 或多余空格。',
+        stageState: {
+          pyCode: 'n = int(input())\nscores = [int(input()) for _ in range(n)]\navg = sum(scores) / n\nprint(f"{avg:.2f}")',
+          pyStdin: '3\n85\n92\n78',
+          pyStdout: '85.00',
+          pyBadge: '运行通过',
+        },
+      },
+    ],
+  },
+  {
+    id: 'python_branch_loop',
+    category: 'python',
+    label: 'Python 程序设计：分支判断与循环累计',
+    summary: '在 if / elif / else 或 for / while 末尾加英文冒号 :，并用 4 个空格保持同级缩进。',
+    pitfall: '最常见扣分点：① 忘记在 if / for 行末写英文冒号 :；② 缩进空格数不统一导致 IndentationError；③ 把相等判断 == 误写为 =。',
+    frames: [
+      {
+        title: '第 1 步：写好循环骨架与英文冒号',
+        actionText: '用 for i in range(...): 或 for x in nums: 遍历数据，注意行尾冒号和下一行 4 空格缩进（可按 Tab 键）。',
+        highlightControl: 'py_editor',
+        tip: '编辑区按 Tab 键会自动补齐 4 个空格，避免混用 Tab 和空格报错。',
+        stageState: {
+          pyCode: 'count = 0\nfor s in [85, 92, 78, 96]:\n    if s >= 90:\n        count += 1\nprint(count)',
+          pyStdin: '',
+          pyStdout: '',
+          pyBadge: '分支与循环',
+        },
+      },
+      {
+        title: '第 2 步：运行验证分支边界条件',
+        actionText: '点击「运行代码」，重点测试临界值（如刚好等于 90 分是否被计入）。',
+        highlightControl: 'py_output',
+        tip: '注意区分“大于 >”与“大于等于 >=”，严格对照题干条件。',
+        stageState: {
+          pyCode: 'count = 0\nfor s in [85, 92, 78, 96]:\n    if s >= 90:\n        count += 1\nprint(count)',
+          pyStdin: '',
+          pyStdout: '2',
+          pyBadge: '输出正确',
+        },
+      },
+    ],
+  },
+  {
+    id: 'python_func_list',
+    category: 'python',
+    label: 'Python 程序设计：自定义函数与列表处理',
+    summary: '用 def 定义题目要求的函数名与参数，计算完成后用 return 返回结果，再对列表进行筛选、排序或统计。',
+    pitfall: '题目要求函数“返回结果”时必须写 return，不能只写 print！函数名和参数顺序必须与题干完全一致。',
+    frames: [
+      {
+        title: '第 1 步：使用 def 定义函数并 return 结果',
+        actionText: '按题干给定的函数名写出 def func_name(arg):，函数末尾用 return 返回计算值。',
+        highlightControl: 'py_editor',
+        tip: '也可点击顶部快捷模板按钮（如「def 函数」）快速插入标准骨架。',
+        stageState: {
+          pyCode: 'def calc_avg(arr):\n    return round(sum(arr) / len(arr), 2)\n\nprint(calc_avg([80, 90, 95]))',
+          pyStdin: '',
+          pyStdout: '',
+          pyBadge: '函数定义',
+        },
+      },
+      {
+        title: '第 2 步：用模拟数据调用函数并运行',
+        actionText: '在主程序调用函数并打印结果，点「运行代码」确认返回值与列表处理无误。',
+        highlightControl: 'btn_py_run',
+        tip: '列表常用内置函数：len() 求长度、sum() 求和、max()/min() 求最值、sorted() 排序。',
+        stageState: {
+          pyCode: 'def calc_avg(arr):\n    return round(sum(arr) / len(arr), 2)\n\nprint(calc_avg([80, 90, 95]))',
+          pyStdin: '',
+          pyStdout: '88.33',
+          pyBadge: '验证通过',
+        },
+      },
+    ],
+  },
+
+  // ================= DATABASE / SQL =================
+  {
+    id: 'sql_select',
+    category: 'database',
+    label: '数据库查询：SELECT 条件与排序筛选',
+    summary: '按 SELECT 字段 FROM 表名 WHERE 条件 ORDER BY 字段 DESC 顺序书写 SQL，点击「执行 SQL」看结果。',
+    pitfall: 'SQL 字符串值必须用英文单引号 \'...\' 包裹；多条件用 AND / OR 连接；降序要写 DESC，升序为 ASC。',
+    frames: [
+      {
+        title: '第 1 步：查看左侧数据表结构与字段名',
+        actionText: '先在左侧数据表区确认表名（如 books）和准确字段名，不要拼错列名。',
+        highlightControl: 'sql_schema',
+        tip: 'SELECT * 表示查询全部列；如果题目只要求某些列，请依次列出列名并用英文逗号隔开。',
+        stageState: {
+          sqlTableName: 'books',
+          sqlTableCols: ['id', 'title', 'category', 'score'],
+          sqlTableRows: [
+            [1, 'Python程序设计', '编程', 94],
+            [2, '数据结构基础', '算法', 88],
+            [3, '信息系统与社会', '基础', 91],
+          ],
+          sqlText: 'SELECT title, score FROM books',
+          sqlActionNote: '先核对左侧表名与列名',
+        },
+      },
+      {
+        title: '第 2 步：补全 WHERE 条件与 ORDER BY 并执行',
+        actionText: '加上 WHERE 过滤条件和 ORDER BY ... DESC 排序后，点击「执行 SQL」查看右下角查询结果。',
+        highlightControl: 'btn_sql_run',
+        tip: '模糊匹配用 LIKE \'%关键词%\'，区间筛选用 BETWEEN ... AND ... 或 >= / <=。',
+        stageState: {
+          sqlTableName: 'books',
+          sqlTableCols: ['id', 'title', 'category', 'score'],
+          sqlTableRows: [
+            [1, 'Python程序设计', '编程', 94],
+            [2, '数据结构基础', '算法', 88],
+            [3, '信息系统与社会', '基础', 91],
+          ],
+          sqlText: 'SELECT title, score FROM books\nWHERE score >= 90\nORDER BY score DESC;',
+          sqlResultCols: ['title', 'score'],
+          sqlResultRows: [
+            ['Python程序设计', 94],
+            ['信息系统与社会', 91],
+          ],
+          sqlActionNote: '查询命中 2 条记录',
+        },
+      },
+    ],
+  },
+  {
+    id: 'sql_aggregate',
+    category: 'database',
+    label: '数据库查询：聚合统计与 GROUP BY 分组',
+    summary: '使用 COUNT(*) / SUM() / AVG() / MAX() 配合 GROUP BY 分组统计，并按题干要求用 AS 取别名。',
+    pitfall: '使用 GROUP BY 按某列分组时，SELECT 里通常只能出现分组列和聚合函数；对分组后的汇总结果再过滤要用 HAVING 而不是 WHERE。',
+    frames: [
+      {
+        title: '第 1 步：写好聚合函数与 AS 别名',
+        actionText: '用 COUNT(*) 或 AVG(字段) 统计指标，并用 AS 别名 命名输出列（如 AS 借阅次数）。',
+        highlightControl: 'sql_editor',
+        tip: '如果题目明确给出结果列名（例如 total_count），务必用 AS 保持完全一致。',
+        stageState: {
+          sqlTableName: 'borrow_records',
+          sqlTableCols: ['class_name', 'book_title', 'days'],
+          sqlTableRows: [
+            ['高一(1)班', '算法导论', 14],
+            ['高一(1)班', 'Python入门', 7],
+            ['高一(2)班', '网页设计', 10],
+          ],
+          sqlText: 'SELECT class_name, COUNT(*) AS cnt\nFROM borrow_records\nGROUP BY class_name;',
+          sqlActionNote: '按 class_name 分组统计',
+        },
+      },
+      {
+        title: '第 2 步：点击「执行 SQL」核对分组统计表',
+        actionText: '点击「执行 SQL」，检查结果表中的分组名称与统计数字是否正确。',
+        highlightControl: 'sql_result',
+        tip: '如需保留小数可写 ROUND(AVG(字段), 2)。',
+        stageState: {
+          sqlTableName: 'borrow_records',
+          sqlTableCols: ['class_name', 'book_title', 'days'],
+          sqlTableRows: [
+            ['高一(1)班', '算法导论', 14],
+            ['高一(1)班', 'Python入门', 7],
+            ['高一(2)班', '网页设计', 10],
+          ],
+          sqlText: 'SELECT class_name, COUNT(*) AS cnt\nFROM borrow_records\nGROUP BY class_name;',
+          sqlResultCols: ['class_name', 'cnt'],
+          sqlResultRows: [
+            ['高一(1)班', 2],
+            ['高一(2)班', 1],
+          ],
+          sqlActionNote: '分组汇总完成',
+        },
+      },
+    ],
+  },
+  {
+    id: 'sql_dml',
+    category: 'database',
+    label: '数据库操作：INSERT / UPDATE / DELETE 更新',
+    summary: '编写插入、修改或删除 SQL 后点击「执行 SQL」，再到左侧切换「当前表快照」核对表内容变化。',
+    pitfall: '执行 UPDATE 或 DELETE 时一定要写 WHERE 条件！漏写 WHERE 会把整张表的所有行全部改掉或删光！',
+    frames: [
+      {
+        title: '第 1 步：编写带精确 WHERE 条件的更新/删除语句',
+        actionText: '使用 INSERT INTO ... VALUES (...)、UPDATE ... SET ... WHERE ... 或 DELETE FROM ... WHERE ...。',
+        highlightControl: 'sql_editor',
+        tip: '多条 SQL 语句之间请用英文分号 ; 隔开。',
+        stageState: {
+          sqlTableName: 'students',
+          sqlTableCols: ['id', 'name', 'score'],
+          sqlTableRows: [
+            [1, '张伟', 82],
+            [2, '李娜', 90],
+          ],
+          sqlText: "UPDATE students SET score = 95\nWHERE name = '张伟';",
+          sqlActionNote: '确认 WHERE 条件精准定位到目标行',
+        },
+      },
+      {
+        title: '第 2 步：执行并在左侧查看更新后表数据',
+        actionText: '点击「执行 SQL」，观察影响行数及左侧数据表更新后的最新行内容。',
+        highlightControl: 'sql_schema',
+        tip: '系统会自动保留原始初始表快照用于重新验证，不用担心把表改坏，随时可修改 SQL 重试。',
+        stageState: {
+          sqlTableName: 'students',
+          sqlTableCols: ['id', 'name', 'score'],
+          sqlTableRows: [
+            [1, '张伟', 95],
+            [2, '李娜', 90],
+          ],
+          sqlText: "UPDATE students SET score = 95\nWHERE name = '张伟';",
+          sqlActionNote: '已更新 1 行：张伟 score → 95',
+        },
+      },
+    ],
+  },
 ];
 
 interface Props {
@@ -670,6 +925,8 @@ const CATEGORY_META: Array<{ id: QuestionType; label: string; icon: typeof FileT
   { id: 'excel', label: 'Excel 电子表格', icon: FileSpreadsheet },
   { id: 'web', label: '网页制作 (HTML/CSS)', icon: FileCode2 },
   { id: 'file', label: '文件与文件夹管理', icon: FolderOpen },
+  { id: 'python', label: 'Python 程序设计', icon: Terminal },
+  { id: 'database', label: '数据库与 SQL 查询', icon: Database },
 ];
 
 export default function StepGuideShowcase({
@@ -750,7 +1007,7 @@ export default function StepGuideShowcase({
           <div className="text-xs font-semibold text-slate-700">
             选择操作题型与动画演示主题：
           </div>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
             {CATEGORY_META.map((cat) => {
               const Icon = cat.icon;
               const items = GUIDE_TOPICS.filter((t) => t.category === cat.id);
@@ -1443,6 +1700,196 @@ function MockSimulatorStage({
                 （在左侧输入 HTML/CSS 后，这里会实时显示网页效果）
               </div>
             )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (category === 'python') {
+    return (
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden text-xs">
+        <div className="bg-slate-50 border-b border-slate-200 p-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            <span className="px-2 py-0.5 rounded bg-white border border-slate-200 font-mono text-[11px] text-slate-700">
+              main.py
+            </span>
+            <span className="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-[10px] font-mono text-slate-600">
+              + input
+            </span>
+            <span className="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-[10px] font-mono text-slate-600">
+              + for
+            </span>
+            <span className="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-[10px] font-mono text-slate-600">
+              + def
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span
+              className={`px-2.5 py-1 rounded text-[11px] font-medium ${
+                hc === 'btn_py_run'
+                  ? 'bg-sky-600 text-white ring-2 ring-amber-400'
+                  : 'bg-sky-600 text-white'
+              }`}
+            >
+              运行代码
+            </span>
+            {hc === 'btn_py_run' && <PointerHint label="点这里运行" />}
+          </div>
+        </div>
+
+        <div
+          className={`p-3 bg-slate-900 text-slate-100 font-mono text-[11px] whitespace-pre-wrap min-h-[116px] ${
+            hc === 'py_editor' ? 'ring-2 ring-inset ring-sky-400' : ''
+          }`}
+        >
+          {st.pyCode || 'n = int(input())\nprint(n * 2)'}
+        </div>
+
+        <div className="grid sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-slate-200 bg-slate-50">
+          <div className="p-2.5 space-y-1">
+            <div className="text-[10px] font-semibold text-slate-500">
+              标准输入（stdin）
+            </div>
+            <pre className="font-mono text-[11px] text-slate-700 bg-white border border-slate-200 rounded p-1.5 min-h-[42px]">
+              {st.pyStdin || '（无输入数据）'}
+            </pre>
+          </div>
+          <div
+            className={`p-2.5 space-y-1 ${
+              hc === 'py_output' ? 'ring-2 ring-inset ring-sky-400 bg-sky-50/40' : ''
+            }`}
+          >
+            <div className="flex items-center justify-between text-[10px] font-semibold text-slate-500">
+              <span>运行输出（stdout）</span>
+              {st.pyBadge && (
+                <span className="text-teal-700">{st.pyBadge}</span>
+              )}
+            </div>
+            <pre className="font-mono text-[11px] text-teal-800 bg-white border border-slate-200 rounded p-1.5 min-h-[42px]">
+              {st.pyStdout || '（点击「运行代码」查看输出结果）'}
+            </pre>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (category === 'database') {
+    const tCols = st.sqlTableCols || ['id', 'name', 'score'];
+    const tRows = st.sqlTableRows || [
+      [1, '示例A', 90],
+      [2, '示例B', 85],
+    ];
+    return (
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden text-xs">
+        <div className="bg-slate-50 border-b border-slate-200 p-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            <span className="px-2 py-0.5 rounded bg-white border border-slate-200 text-[10px] font-mono text-slate-700">
+              SELECT ... FROM
+            </span>
+            <span className="px-2 py-0.5 rounded bg-white border border-slate-200 text-[10px] font-mono text-slate-700">
+              GROUP BY
+            </span>
+            <span className="px-2 py-0.5 rounded bg-white border border-slate-200 text-[10px] font-mono text-slate-700">
+              ORDER BY DESC
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span
+              className={`px-2.5 py-1 rounded text-[11px] font-medium ${
+                hc === 'btn_sql_run'
+                  ? 'bg-sky-600 text-white ring-2 ring-amber-400'
+                  : 'bg-sky-600 text-white'
+              }`}
+            >
+              执行 SQL
+            </span>
+            {hc === 'btn_sql_run' && <PointerHint label="点这里执行" />}
+          </div>
+        </div>
+
+        <div className="grid sm:grid-cols-12 divide-y sm:divide-y-0 sm:divide-x divide-slate-200">
+          <div
+            className={`sm:col-span-5 p-2.5 bg-slate-50/60 space-y-1.5 ${
+              hc === 'sql_schema' ? 'ring-2 ring-inset ring-sky-400 bg-sky-50/40' : ''
+            }`}
+          >
+            <div className="flex items-center justify-between text-[10px] font-semibold text-slate-600">
+              <span>数据表：{st.sqlTableName || 'books'}</span>
+              {st.sqlActionNote && (
+                <span className="text-sky-700 font-medium">{st.sqlActionNote}</span>
+              )}
+            </div>
+            <table className="w-full border-collapse text-[10px] tabular-nums bg-white">
+              <thead>
+                <tr className="bg-slate-100 text-slate-700">
+                  {tCols.map((c) => (
+                    <th key={c} className="border border-slate-200 px-1.5 py-0.5 text-left font-mono">
+                      {c}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {tRows.map((row, idx) => (
+                  <tr key={idx}>
+                    {row.map((val, cIdx) => (
+                      <td key={cIdx} className="border border-slate-200 px-1.5 py-0.5 text-slate-700">
+                        {String(val)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="sm:col-span-7 flex flex-col divide-y divide-slate-200">
+            <div
+              className={`p-2.5 bg-slate-900 text-slate-100 font-mono text-[11px] whitespace-pre-wrap min-h-[72px] ${
+                hc === 'sql_editor' ? 'ring-2 ring-inset ring-sky-400' : ''
+              }`}
+            >
+              {st.sqlText || 'SELECT * FROM books;'}
+            </div>
+            <div
+              className={`p-2.5 bg-white min-h-[76px] space-y-1 ${
+                hc === 'sql_result' ? 'ring-2 ring-inset ring-sky-400 bg-sky-50/30' : ''
+              }`}
+            >
+              <div className="text-[10px] font-semibold text-slate-500">
+                SQL 查询结果
+              </div>
+              {st.sqlResultCols && st.sqlResultRows ? (
+                <table className="w-full border-collapse text-[10px] tabular-nums">
+                  <thead>
+                    <tr className="bg-teal-50 text-teal-900">
+                      {st.sqlResultCols.map((c) => (
+                        <th key={c} className="border border-teal-200 px-1.5 py-0.5 text-left font-mono">
+                          {c}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {st.sqlResultRows.map((row, idx) => (
+                      <tr key={idx}>
+                        {row.map((val, cIdx) => (
+                          <td key={cIdx} className="border border-slate-200 px-1.5 py-0.5 text-slate-800">
+                            {String(val)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="text-[11px] text-slate-400">
+                  （点击「执行 SQL」后此处显示查询结果表格）
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

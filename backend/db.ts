@@ -464,62 +464,57 @@ function initializeDefaults(db: Database.Database) {
     seedDemoSchoolData(db, now);
   }
 
-  // 3. Seed built-in knowledge points
-  const kpCount = db
-    .prepare('SELECT COUNT(*) as cnt FROM knowledge_points')
-    .get() as { cnt: number };
-  if (kpCount.cnt === 0) {
-    const insertKp = db.prepare(
-      `INSERT INTO knowledge_points (id, type, chapter, name, is_system, owner_id, created_at)
-       VALUES (?, ?, ?, ?, 1, '', ?)`
-    );
-    const txKp = db.transaction(() => {
-      for (const kp of BUILTIN_KNOWLEDGE_POINTS) {
-        insertKp.run(kp.id, kp.type, kp.chapter, kp.name, now);
-      }
-    });
-    txKp();
-  }
+  // 3. Seed/sync built-in system knowledge points (adds newly expanded points to existing DBs)
+  const upsertKp = db.prepare(
+    `INSERT INTO knowledge_points (id, type, chapter, name, is_system, owner_id, created_at)
+     VALUES (?, ?, ?, ?, 1, '', ?)
+     ON CONFLICT(id) DO UPDATE SET
+       type = excluded.type,
+       chapter = excluded.chapter,
+       name = excluded.name
+     WHERE knowledge_points.is_system = 1`
+  );
+  const txKp = db.transaction(() => {
+    for (const kp of BUILTIN_KNOWLEDGE_POINTS) {
+      upsertKp.run(kp.id, kp.type, kp.chapter, kp.name, now);
+    }
+  });
+  txKp();
 
-  // 4. Seed built-in questions
-  const qCount = db
-    .prepare('SELECT COUNT(*) as cnt FROM questions')
-    .get() as { cnt: number };
-  if (qCount.cnt === 0) {
-    const insertQ = db.prepare(`
-      INSERT INTO questions (
-        id, title, type, difficulty, knowledge_points_json, knowledge_point_ids_json, scenario,
-        total_score, materials_json, steps_json, checkpoints_json,
-        reference_answer_json, analysis_json, common_mistakes_json,
-        status, source, owner_id, visibility, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'system', 'public', ?, ?)
-    `);
+  // 4. Seed/sync built-in questions (INSERT OR IGNORE adds newly added question types to existing DBs)
+  const insertQ = db.prepare(`
+    INSERT OR IGNORE INTO questions (
+      id, title, type, difficulty, knowledge_points_json, knowledge_point_ids_json, scenario,
+      total_score, materials_json, steps_json, checkpoints_json,
+      reference_answer_json, analysis_json, common_mistakes_json,
+      status, source, owner_id, visibility, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'system', 'public', ?, ?)
+  `);
 
-    const tx = db.transaction((questions: Omit<Question, 'ownerId' | 'visibility'>[]) => {
-      for (const q of questions) {
-        insertQ.run(
-          q.id,
-          q.title,
-          q.type,
-          q.difficulty,
-          JSON.stringify(q.knowledgePoints),
-          q.scenario,
-          q.totalScore,
-          JSON.stringify(q.materials),
-          JSON.stringify(q.steps),
-          JSON.stringify(q.checkpoints),
-          JSON.stringify(q.referenceAnswer),
-          JSON.stringify(q.analysis),
-          JSON.stringify(q.commonMistakes),
-          q.status,
-          q.source,
-          q.createdAt,
-          q.updatedAt
-        );
-      }
-    });
-    tx(SEED_QUESTIONS);
-  }
+  const txQ = db.transaction((questions: Omit<Question, 'ownerId' | 'visibility'>[]) => {
+    for (const q of questions) {
+      insertQ.run(
+        q.id,
+        q.title,
+        q.type,
+        q.difficulty,
+        JSON.stringify(q.knowledgePoints),
+        q.scenario,
+        q.totalScore,
+        JSON.stringify(q.materials),
+        JSON.stringify(q.steps),
+        JSON.stringify(q.checkpoints),
+        JSON.stringify(q.referenceAnswer),
+        JSON.stringify(q.analysis),
+        JSON.stringify(q.commonMistakes),
+        q.status,
+        q.source,
+        q.createdAt,
+        q.updatedAt
+      );
+    }
+  });
+  txQ(SEED_QUESTIONS);
 
   // 5. Seed 1 published sample exam for default teacher & default class
   if (APP_CONFIG.platform.authMode !== 'platform') {
@@ -657,6 +652,56 @@ function seedSampleExam(db: Database.Database, now: string) {
       teacherRow.id,
       '新考试通知：高一信息技术会考操作题综合摸底测试',
       '刘老师发布了「高一信息技术会考操作题综合摸底测试」，包含 4 道操作题，请及时进入作答。',
+      now
+    );
+  }
+
+  // 自动补发一套 Python 程序设计与数据库 SQL 专项练习试卷（不重复覆盖）
+  const pyDbExam = db
+    .prepare("SELECT id FROM exams WHERE id = 'exam-seed-2'")
+    .get();
+  if (!pyDbExam) {
+    const startTime = new Date(Date.now() - 3600 * 1000).toISOString();
+    const endTime = new Date(Date.now() + 60 * 24 * 3600 * 1000).toISOString();
+    const pyDbExamId = 'exam-seed-2';
+    db.prepare(
+      `INSERT OR IGNORE INTO exams (
+        id, title, description, teacher_id, duration, start_time, end_time,
+        max_attempts, score_policy, show_score_immediately, show_answer_policy,
+        shuffle, anti_cheat_switch, allow_late, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 25, ?, ?, 3, 'highest', 1, 'immediate', 0, 1, 0, 'published', ?, ?)`
+    ).run(
+      pyDbExamId,
+      '会考拓展专项：Python 程序设计与数据库 SQL 查询',
+      '覆盖安徽省高中信息技术学业水平考试 Python 编程与数据库 SQL 查询实操题型，支持在线运行调试与逐步检查提示。',
+      teacherRow.id,
+      startTime,
+      endTime,
+      now,
+      now
+    );
+
+    const pyDbQIds = ['seed-python-1', 'seed-database-1'];
+    const insertEq2 = db.prepare(
+      `INSERT OR IGNORE INTO exam_questions (id, exam_id, question_id, sort_order, score)
+       VALUES (?, ?, ?, ?, 100)`
+    );
+    pyDbQIds.forEach((qid, idx) => {
+      insertEq2.run(`eq-seed-pydb-${idx + 1}`, pyDbExamId, qid, idx + 1);
+    });
+
+    db.prepare(
+      `INSERT OR IGNORE INTO exam_assignments (id, exam_id, target_type, target_id)
+       VALUES ('ea-seed-2', ?, 'class', ?)`
+    ).run(pyDbExamId, defaultClass.id);
+
+    db.prepare(
+      `INSERT OR IGNORE INTO notifications (id, user_id, sender_id, type, title, content, link, is_read, created_at)
+       VALUES ('notif-seed-2', 'student-demo-1', ?, 'exam_published', ?, ?, '/', 0, ?)`
+    ).run(
+      teacherRow.id,
+      '新专项练习：Python 程序设计与数据库 SQL 查询',
+      '系统已新增 Python 编程与数据库 SQL 实战题库，欢迎进入练习并实时运行调试！',
       now
     );
   }

@@ -1,7 +1,9 @@
 import type {
+  DatabaseState,
   ExcelCell,
   ExcelState,
   FileState,
+  PythonState,
   QuestionType,
   SimulatorState,
   WebState,
@@ -273,6 +275,25 @@ export function describeChange(
         return describeWeb(prev as WebState, next as WebState);
       case 'file':
         return describeFile(prev as FileState, next as FileState);
+      case 'python': {
+        const p = prev as PythonState;
+        const n = next as PythonState;
+        if (p.code !== n.code) {
+          return { label: '编辑 Python 代码', coalesceKey: 'python-code', showToast: false };
+        }
+        if (p.customInput !== n.customInput) {
+          return { label: '修改测试输入', coalesceKey: 'python-stdin', showToast: false };
+        }
+        return { label: '运行 Python 代码', coalesceKey: null, showToast: false };
+      }
+      case 'database': {
+        const p = prev as DatabaseState;
+        const n = next as DatabaseState;
+        if (p.sql !== n.sql) {
+          return { label: '编辑 SQL 语句', coalesceKey: 'db-sql', showToast: false };
+        }
+        return { label: '执行 SQL 查询', coalesceKey: null, showToast: false };
+      }
       default:
         break;
     }

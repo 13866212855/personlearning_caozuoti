@@ -14,6 +14,9 @@ nextApp
 
     // Express 5 wildcard regex for forwarding all non-API routes to Next.js
     server.all(/.*/, (req, res) => {
+      if (dev && req.method === 'GET' && !req.url?.startsWith('/_next/')) {
+        res.setHeader('Cache-Control', 'no-store');
+      }
       const parsedUrl = parse(req.url || '/', true);
       return handle(req, res, parsedUrl);
     });

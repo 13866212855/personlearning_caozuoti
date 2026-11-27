@@ -301,3 +301,34 @@ export function requireAdminAuth(
     res.status(401).json({ error: '管理员登录已过期，请重新登录' });
   }
 }
+
+export function requireAnyUserAuth(
+  req: AuthedRequest,
+  res: Response,
+  next: NextFunction
+) {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  if (!token) {
+    res.status(401).json({ error: '请先登录账号' });
+    return;
+  }
+
+  try {
+    const decoded = jwt.verify(
+      token,
+      APP_CONFIG.studentJwtSecret
+    ) as PortalJwtPayload;
+    if (decoded.role === 'teacher' || decoded.role === 'student') {
+      if (verifyPortalUser(req, res, ['teacher', 'student'])) {
+        next();
+      }
+      return;
+    }
+  } catch {
+    // Fall through to admin JWT verification
+  }
+
+  requireAdminAuth(req, res, next);
+}
+

@@ -717,7 +717,7 @@ router.get('/knowledge-points', (req: AuthedRequest, res) => {
 
 router.post('/knowledge-points', (req: AuthedRequest, res) => {
   const schema = z.object({
-    type: z.enum(['word', 'excel', 'web', 'file']),
+    type: z.enum(['word', 'excel', 'web', 'file', 'python', 'database']),
     chapter: z.string().trim().min(1).max(40).default('教师自定义'),
     name: z.string().trim().min(1, '知识点名称不能为空').max(40),
   });
@@ -754,7 +754,7 @@ router.post('/knowledge-points', (req: AuthedRequest, res) => {
 
 router.post('/questions/ai-generate', async (req: AuthedRequest, res) => {
   const schema = z.object({
-    type: z.enum(['word', 'excel', 'web', 'file']),
+    type: z.enum(['word', 'excel', 'web', 'file', 'python', 'database']),
     difficulty: z.enum(['基础', '中等', '提高']).default('中等'),
     count: z.number().int().min(1).max(5).default(1),
     stepCount: z.number().int().min(3).max(8).default(4),
@@ -820,7 +820,7 @@ router.post('/questions/ai-generate', async (req: AuthedRequest, res) => {
 // Teacher "试做" simulator verification
 router.post('/questions/test-grade', (req: AuthedRequest, res) => {
   const schema = z.object({
-    type: z.enum(['word', 'excel', 'web', 'file']),
+    type: z.enum(['word', 'excel', 'web', 'file', 'python', 'database']),
     checkpoints: z.array(z.record(z.string(), z.unknown())),
     answer: z.record(z.string(), z.unknown()),
   });
@@ -865,7 +865,7 @@ router.get('/questions', (req: AuthedRequest, res) => {
     args.push(req.teacher!.id);
   }
 
-  if (type && ['word', 'excel', 'web', 'file'].includes(type)) {
+  if (type && ['word', 'excel', 'web', 'file', 'python', 'database'].includes(type)) {
     where.push('q.type = ?');
     args.push(type);
   }
@@ -918,7 +918,7 @@ router.get('/questions', (req: AuthedRequest, res) => {
 router.post('/questions', (req: AuthedRequest, res) => {
   const schema = z.object({
     title: z.string().trim().min(2),
-    type: z.enum(['word', 'excel', 'web', 'file']),
+    type: z.enum(['word', 'excel', 'web', 'file', 'python', 'database']),
     difficulty: z.enum(['基础', '中等', '提高']),
     knowledgePoints: z.array(z.string()).default([]),
     knowledgePointIds: z.array(z.string()).default([]),
@@ -1237,7 +1237,7 @@ router.post('/questions/assign', (req: AuthedRequest, res) => {
 // ==================== 4. Teacher Exam Management ====================
 router.post('/exams/auto-pick', (req: AuthedRequest, res) => {
   const schema = z.object({
-    type: z.enum(['word', 'excel', 'web', 'file', '']).default(''),
+    type: z.enum(['word', 'excel', 'web', 'file', 'python', 'database', '']).default(''),
     difficulty: z.enum(['基础', '中等', '提高', '']).default(''),
     knowledgePoint: z.string().default(''),
     count: z.number().int().min(1).max(20).default(2),
@@ -2389,7 +2389,7 @@ router.post('/exams/:id/remind-unsubmitted', (req: AuthedRequest, res) => {
 router.post('/exams/:id/remedial-practice', async (req: AuthedRequest, res) => {
   const schema = z.object({
     knowledgePoint: z.string().min(1),
-    type: z.enum(['word', 'excel', 'web', 'file']).default('excel'),
+    type: z.enum(['word', 'excel', 'web', 'file', 'python', 'database']).default('excel'),
     targetStudentIds: z.array(z.string()).min(1, '请选择需要推送补练的学生'),
   });
   const parsed = schema.safeParse(req.body);

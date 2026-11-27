@@ -1,5 +1,11 @@
 export type UserRole = 'super_admin' | 'teacher' | 'student';
-export type QuestionType = 'word' | 'excel' | 'web' | 'file';
+export type QuestionType =
+  | 'word'
+  | 'excel'
+  | 'web'
+  | 'file'
+  | 'python'
+  | 'database';
 export type DifficultyLevel = '基础' | '中等' | '提高';
 export type QuestionVisibility = 'private' | 'shared' | 'public';
 
@@ -105,7 +111,35 @@ export interface FileState {
   items: VirtualFileItem[];
 }
 
-export type SimulatorState = WordState | ExcelState | WebState | FileState;
+export interface PythonState {
+  code: string;
+  customInput?: string;
+  lastOutput?: string;
+  lastError?: string;
+}
+
+export interface DatabaseTable {
+  name: string;
+  columns: string[];
+  rows: Array<Array<string | number | null>>;
+}
+
+export interface DatabaseState {
+  tables: DatabaseTable[];
+  sql: string;
+  lastColumns?: string[];
+  lastRows?: Array<Array<string | number | null>>;
+  lastChanges?: number;
+  lastError?: string;
+}
+
+export type SimulatorState =
+  | WordState
+  | ExcelState
+  | WebState
+  | FileState
+  | PythonState
+  | DatabaseState;
 
 export interface QuestionStep {
   index: number;
@@ -303,4 +337,6 @@ export const TYPE_LABELS: Record<QuestionType, string> = {
   excel: 'Excel 电子表格',
   web: '网页制作 (HTML/CSS)',
   file: '文件与文件夹管理',
+  python: 'Python 程序设计',
+  database: '数据库与 SQL 查询',
 };

@@ -467,6 +467,8 @@ router.get('/stats', (req: AuthedRequest, res) => {
     excel: { sum: 0, count: 0 },
     web: { sum: 0, count: 0 },
     file: { sum: 0, count: 0 },
+    python: { sum: 0, count: 0 },
+    database: { sum: 0, count: 0 },
   };
   const kpStats: Record<string, { sumPct: number; count: number }> = {};
 

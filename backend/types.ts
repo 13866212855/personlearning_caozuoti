@@ -1,5 +1,11 @@
 export type UserRole = 'super_admin' | 'teacher' | 'student';
-export type QuestionType = 'word' | 'excel' | 'web' | 'file';
+export type QuestionType =
+  | 'word'
+  | 'excel'
+  | 'web'
+  | 'file'
+  | 'python'
+  | 'database';
 export type DifficultyLevel = '基础' | '中等' | '提高';
 export type QuestionStatus = 'draft' | 'published';
 export type QuestionVisibility = 'private' | 'shared' | 'public';
@@ -106,7 +112,35 @@ export interface FileState {
   items: VirtualFileItem[];
 }
 
-export type SimulatorState = WordState | ExcelState | WebState | FileState;
+export interface PythonState {
+  code: string;
+  customInput?: string;
+  lastOutput?: string;
+  lastError?: string;
+}
+
+export interface DatabaseTable {
+  name: string;
+  columns: string[];
+  rows: Array<Array<string | number | null>>;
+}
+
+export interface DatabaseState {
+  tables: DatabaseTable[];
+  sql: string;
+  lastColumns?: string[];
+  lastRows?: Array<Array<string | number | null>>;
+  lastChanges?: number;
+  lastError?: string;
+}
+
+export type SimulatorState =
+  | WordState
+  | ExcelState
+  | WebState
+  | FileState
+  | PythonState
+  | DatabaseState;
 
 export interface QuestionStep {
   index: number;

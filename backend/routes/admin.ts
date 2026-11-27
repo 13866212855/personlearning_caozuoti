@@ -219,6 +219,8 @@ router.get('/overview', (_req, res) => {
     excel: { sum: 0, count: 0 },
     web: { sum: 0, count: 0 },
     file: { sum: 0, count: 0 },
+    python: { sum: 0, count: 0 },
+    database: { sum: 0, count: 0 },
   };
 
   const legacyByType = db
@@ -447,7 +449,7 @@ router.get('/questions', (req, res) => {
     where.push('(q.title LIKE ? OR q.scenario LIKE ? OR q.knowledge_points_json LIKE ?)');
     args.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
   }
-  if (type && ['word', 'excel', 'web', 'file'].includes(type)) {
+  if (type && ['word', 'excel', 'web', 'file', 'python', 'database'].includes(type)) {
     where.push('q.type = ?');
     args.push(type);
   }
@@ -508,7 +510,7 @@ router.get('/questions/:id', (req, res) => {
 router.post('/questions', (req: AuthedRequest, res) => {
   const schema = z.object({
     title: z.string().trim().min(2),
-    type: z.enum(['word', 'excel', 'web', 'file']),
+    type: z.enum(['word', 'excel', 'web', 'file', 'python', 'database']),
     difficulty: z.enum(['基础', '中等', '提高']),
     knowledgePoints: z.array(z.string()).min(1),
     scenario: z.string().min(5),
@@ -685,7 +687,7 @@ router.delete('/questions/:id', (req: AuthedRequest, res) => {
 
 router.post('/questions/batch-generate', (req: AuthedRequest, res) => {
   const schema = z.object({
-    type: z.enum(['word', 'excel', 'web', 'file']),
+    type: z.enum(['word', 'excel', 'web', 'file', 'python', 'database']),
     difficulty: z.enum(['基础', '中等', '提高']),
     count: z.number().int().min(1).max(10),
     knowledgePoint: z.string().trim().optional(),
@@ -907,7 +909,7 @@ router.get('/submissions', (req, res) => {
     where.push('st.class_name LIKE ?');
     args.push(`%${className}%`);
   }
-  if (type && ['word', 'excel', 'web', 'file'].includes(type)) {
+  if (type && ['word', 'excel', 'web', 'file', 'python', 'database'].includes(type)) {
     where.push('q.type = ?');
     args.push(type);
   }

@@ -1637,4 +1637,255 @@ table {
     createdAt: now,
     updatedAt: now,
   },
+
+  // ================= PYTHON 1 =================
+  {
+    id: 'seed-python-1',
+    title: '校园体测成绩筛选与平均分统计（Python）',
+    type: 'python',
+    difficulty: '基础',
+    knowledgePoints: ['输入输出与数据类型转换', '选择分支结构', '计数循环结构', '列表创建与遍历统计'],
+    scenario:
+      '学校体育组收集了一批同学的 50 米体测折算得分（逗号分隔输入），请你编写一段 Python 程序：读入数据并转换为整数列表，统计及格（>=60分）人数，并按要求格式输出结果。',
+    totalScore: 100,
+    materials: {
+      description: '输入为一行英文逗号分隔的整数成绩（如：85,54,92,60,48），请在代码编辑区补充完整 Python 代码。',
+      initialState: {
+        code: `# 读取一行成绩并按逗号分割为整数列表
+line = input().strip()
+scores = [int(x) for x in line.split(",") if x.strip()]
+
+# 1. 请补充统计及格人数（>=60）与及格总分的变量和 for 循环
+pass_count = 0
+pass_sum = 0
+
+# 2. 按要求计算平均分并输出兩行结果
+`,
+        customInput: '85,54,92,60,48',
+        lastOutput: '',
+        lastError: '',
+      },
+    },
+    steps: [
+      {
+        index: 1,
+        instruction: '使用 for 循环遍历 scores 列表，配合 if 判断筛选出大于等于 60 分的成绩，累加到 pass_count 和 pass_sum。',
+        score: 30,
+        hint: 'for s in scores:\\n    if s >= 60:\\n        pass_count += 1\\n        pass_sum += s',
+      },
+      {
+        index: 2,
+        instruction: '确保程序无任何语法错误，计算及格同学的平均分（若 pass_count > 0 则为 pass_sum / pass_count，否则为 0）。',
+        score: 20,
+        hint: 'avg = pass_sum / pass_count if pass_count > 0 else 0',
+      },
+      {
+        index: 3,
+        instruction: '严格分两行输出：第 1 行输出「及格人数:X」（无空格），第 2 行输出「及格平均分:Y.Y」（保留 1 位小数，如 :.1f）。',
+        score: 50,
+        hint: 'print(f"及格人数:{pass_count}")\\nprint(f"及格平均分:{avg:.1f}")',
+      },
+    ],
+    checkpoints: [
+      {
+        id: 'cp-py1-1',
+        stepIndex: 1,
+        description: '使用 for 循环与 >= 60 条件判断统计及格成绩',
+        score: 30,
+        ruleType: 'python_code_contains',
+        params: { patterns: ['for ', 'if ', '60'] },
+      },
+      {
+        id: 'cp-py1-2',
+        stepIndex: 2,
+        description: 'Python 代码通过语法检查',
+        score: 20,
+        ruleType: 'python_syntax_valid',
+        params: {},
+      },
+      {
+        id: 'cp-py1-3',
+        stepIndex: 3,
+        description: '多组测试样例输入输出完全通过',
+        score: 50,
+        ruleType: 'python_test_cases',
+        params: {
+          cases: [
+            {
+              stdin: '85,54,92,60,48',
+              expectedOutput: '及格人数:3\n及格平均分:79.0',
+            },
+            {
+              stdin: '70,80,90',
+              expectedOutput: '及格人数:3\n及格平均分:80.0',
+            },
+            {
+              stdin: '40,55,59',
+              expectedOutput: '及格人数:0\n及格平均分:0.0',
+            },
+          ],
+        },
+      },
+    ],
+    referenceAnswer: {
+      code: `line = input().strip()
+scores = [int(x) for x in line.split(",") if x.strip()]
+
+pass_count = 0
+pass_sum = 0
+for s in scores:
+    if s >= 60:
+        pass_count += 1
+        pass_sum += s
+
+avg = pass_sum / pass_count if pass_count > 0 else 0
+print(f"及格人数:{pass_count}")
+print(f"及格平均分:{avg:.1f}")`,
+      customInput: '85,54,92,60,48',
+      lastOutput: '及格人数:3\n及格平均分:79.0',
+      lastError: '',
+    },
+    analysis: [
+      '步骤 1：使用 `for s in scores:` 遍历列表，内部用 `if s >= 60:` 累计及格人数与总分。',
+      '步骤 2：求平均分前务必判断 `pass_count > 0`，防止无人及格时出现除以 0 错误（ZeroDivisionError）。',
+      '步骤 3：使用 f-string `f"及格平均分:{avg:.1f}"` 保留 1 位小数输出。',
+    ],
+    commonMistakes: [
+      '忘记处理 `pass_count == 0` 的边界情况，导致全不及格测试样例报错。',
+      '输出冒号用了中文全角 `：` 或冒号后多加了空格，与题目要求 `及格人数:3` 不一致。',
+    ],
+    status: 'published',
+    source: 'seed',
+    createdAt: now,
+    updatedAt: now,
+  },
+
+  // ================= DATABASE 1 =================
+  {
+    id: 'seed-database-1',
+    title: '高一年级图书借阅与评分 SQL 查询统计',
+    type: 'database',
+    difficulty: '基础',
+    knowledgePoints: ['基础投影查询与去重', '条件过滤与模糊匹配', '查询结果排序与限量', '常用聚合统计函数'],
+    scenario:
+      '学校图书馆系统保存了一张图书信息表 `books`（含书号 id、书名 title、分类 category、借阅次数 borrow_count、评分 rating），请你使用 SQL 语句完成精准筛选与排序查询。',
+    totalScore: 100,
+    materials: {
+      description: '左侧可查看 books 数据表的所有字段和原始数据。请按步骤编写 SQL，最后确保输出符合第 3 步要求的查询结果集。',
+      initialState: {
+        tables: [
+          {
+            name: 'books',
+            columns: ['id', 'title', 'category', 'borrow_count', 'rating'],
+            rows: [
+              [1, 'Python编程入门', '信息技术', 128, 4.9],
+              [2, '数据科学导论', '信息技术', 86, 4.7],
+              [3, '红楼梦', '文学名著', 142, 4.9],
+              [4, '人工智能简史', '信息技术', 105, 4.8],
+              [5, '三体', '科幻小说', 210, 4.9],
+              [6, '算法图解', '信息技术', 64, 4.6],
+            ],
+          },
+        ],
+        sql: '-- 请在此编写 SQL 查询语句\nSELECT title, borrow_count, rating\nFROM books;\n',
+        lastColumns: [],
+        lastRows: [],
+        lastChanges: 0,
+        lastError: '',
+      },
+    },
+    steps: [
+      {
+        index: 1,
+        instruction: '使用 SELECT 语句从 books 表中查询书名(title)、借阅次数(borrow_count)和评分(rating)三列。',
+        score: 25,
+        hint: 'SELECT title, borrow_count, rating FROM books',
+      },
+      {
+        index: 2,
+        instruction: '使用 WHERE 子句筛选出 category 等于 \'信息技术\' 且 borrow_count >= 80 的图书。',
+        score: 35,
+        hint: "WHERE category = '信息技术' AND borrow_count >= 80",
+      },
+      {
+        index: 3,
+        instruction: '使用 ORDER BY 对查询结果按 borrow_count 从高到低降序（DESC）排列并执行验证。',
+        score: 40,
+        hint: 'ORDER BY borrow_count DESC',
+      },
+    ],
+    checkpoints: [
+      {
+        id: 'cp-db1-1',
+        stepIndex: 1,
+        description: 'SQL 包含 SELECT 与 FROM books 查询结构',
+        score: 25,
+        ruleType: 'sql_code_contains',
+        params: { patterns: ['SELECT', 'FROM books'] },
+      },
+      {
+        id: 'cp-db1-2',
+        stepIndex: 2,
+        description: 'SQL 使用 WHERE 筛选信息技术类且借阅次数>=80',
+        score: 35,
+        ruleType: 'sql_code_contains',
+        params: { patterns: ['WHERE', '信息技术', '80'] },
+      },
+      {
+        id: 'cp-db1-3',
+        stepIndex: 3,
+        description: '查询返回指定三列且按借阅次数降序排列正确',
+        score: 40,
+        ruleType: 'sql_query_result',
+        params: {
+          expectedColumns: ['title', 'borrow_count', 'rating'],
+          expectedRows: [
+            ['Python编程入门', 128, 4.9],
+            ['人工智能简史', 105, 4.8],
+            ['数据科学导论', 86, 4.7],
+          ],
+          ignoreOrder: false,
+        },
+      },
+    ],
+    referenceAnswer: {
+      tables: [
+        {
+          name: 'books',
+          columns: ['id', 'title', 'category', 'borrow_count', 'rating'],
+          rows: [
+            [1, 'Python编程入门', '信息技术', 128, 4.9],
+            [2, '数据科学导论', '信息技术', 86, 4.7],
+            [3, '红楼梦', '文学名著', 142, 4.9],
+            [4, '人工智能简史', '信息技术', 105, 4.8],
+            [5, '三体', '科幻小说', 210, 4.9],
+            [6, '算法图解', '信息技术', 64, 4.6],
+          ],
+        },
+      ],
+      sql: "SELECT title, borrow_count, rating\nFROM books\nWHERE category = '信息技术' AND borrow_count >= 80\nORDER BY borrow_count DESC;",
+      lastColumns: ['title', 'borrow_count', 'rating'],
+      lastRows: [
+        ['Python编程入门', 128, 4.9],
+        ['人工智能简史', 105, 4.8],
+        ['数据科学导论', 86, 4.7],
+      ],
+      lastChanges: 0,
+      lastError: '',
+    },
+    analysis: [
+      '步骤 1：使用 `SELECT title, borrow_count, rating FROM books` 指定需要查询的 3 个字段。',
+      '步骤 2：通过 `WHERE category = \'信息技术\' AND borrow_count >= 80` 过滤条件。',
+      '步骤 3：末尾添加 `ORDER BY borrow_count DESC` 实现按借阅次数从高到低排序。',
+    ],
+    commonMistakes: [
+      '把字段写成了 `SELECT *`，导致返回了多余的 `id` 和 `category` 列。',
+      '忘记写 `DESC`，默认是 `ASC` 升序排列。',
+    ],
+    status: 'published',
+    source: 'seed',
+    createdAt: now,
+    updatedAt: now,
+  },
 ];
+

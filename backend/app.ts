@@ -10,6 +10,7 @@ import profileRoutes from './routes/profile';
 import teacherRoutes from './routes/teacher';
 import notificationRoutes from './routes/notifications';
 import adminRoutes from './routes/admin';
+import runnerRoutes from './routes/runner';
 
 export function createExpressApiApp() {
   // Initialize SQLite database & default records on startup
@@ -71,6 +72,12 @@ export function createExpressApiApp() {
   app.use('/api/teacher', teacherRoutes);
   app.use('/api/notifications', notificationRoutes);
   app.use('/api/admin', adminRoutes);
+  app.use('/api/runner', runnerRoutes);
+
+  // Prevent unmatched /api/* requests from falling through to Next.js HTML 404
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'API 接口不存在' });
+  });
 
   return app;
 }

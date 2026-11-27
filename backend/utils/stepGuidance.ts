@@ -369,6 +369,109 @@ function buildGuidanceForCheckpoint(
     }
   }
 
+  if (qType === 'python') {
+    switch (cp.ruleType) {
+      case 'python_syntax_valid':
+        return {
+          concreteSteps: [
+            '检查左侧代码编辑区中每一行的英文冒号（if / for / while / def 末尾都需要冒号 :）。',
+            '检查同一代码块下的缩进是否对齐（统一使用 4 个空格，不要混用 Tab 和空格）。',
+            '确认所有括号 ()、引号 "" 和逗号都是英文半角符号，点击「运行代码」确认没有红色报错。',
+          ],
+          pitfallTip:
+            'Python 最容易报 SyntaxError 或 IndentationError：忘记写行尾冒号、中文括号或缩进不对齐！',
+          demoTopic: 'python_io',
+          demoLabel: 'Python 语法与输入输出演示',
+        };
+
+      case 'python_code_contains': {
+        const pats = Array.isArray(p.patterns)
+          ? p.patterns.join('、')
+          : String(p.pattern || '关键语句');
+        const isFuncOrList = /def |append|\[|sum\(|len\(/.test(pats);
+        return {
+          concreteSteps: [
+            `按题目要求在代码编辑器中正确写出关键语句或结构（需包含：${pats}）。`,
+            '可以点击编辑区上方工具栏的快捷模板按钮（如 input / for / if / def）快速生成语法框架，再修改变量和条件。',
+            '编写完成后先点「运行代码」观察右侧输出区是否符合预期。',
+          ],
+          pitfallTip:
+            '使用 input() 读入整数或小数做计算时，一定要用 int(input()) 或 float(input()) 进行类型转换，否则字符串无法直接做数学运算。',
+          demoTopic: isFuncOrList ? 'python_func_list' : 'python_branch_loop',
+          demoLabel: isFuncOrList
+            ? 'Python 列表与自定义函数演示'
+            : 'Python 分支与循环结构演示',
+        };
+      }
+
+      default:
+        return {
+          concreteSteps: [
+            '仔细核对题目给出的输入格式与输出格式（注意是否有多余提示文字，例如 input() 内不要随便放多余提示语）。',
+            '在右侧「自定义输入 (stdin)」框填入题目测试数据，点击「运行代码」，对比实际输出与题目要求是否完全一致。',
+            '确认边界情况（如 0、负数、相等条件）也都能算出正确结果。',
+          ],
+          pitfallTip:
+            '自动判分时会直接比较程序 print() 输出的内容！写 input() 时括号里保持为空（即 input()），不要写 input("请输入：")，否则会把提示语一起输出导致比对失败。',
+          demoTopic: 'python_branch_loop',
+          demoLabel: 'Python 程序运行调试与判分演示',
+        };
+    }
+  }
+
+  if (qType === 'database') {
+    switch (cp.ruleType) {
+      case 'sql_code_contains': {
+        const pats = Array.isArray(p.patterns)
+          ? p.patterns.join('、')
+          : String(p.pattern || 'SQL 关键字');
+        const isDml = /insert|update|delete/i.test(pats);
+        const isAgg = /count|avg|sum|max|min|group by/i.test(pats);
+        return {
+          concreteSteps: [
+            '先在左侧「数据表结构预览」查看数据表名称和每一列的准确字段名（注意大小写和拼写）。',
+            `在右侧 SQL 编辑区写出符合规范的 SQL 语句（需包含：${pats}），也可点击工具栏常用 SQL 模板快捷插入。`,
+            '点击「执行 SQL」按钮，确认下方结果预览不报语法错误。',
+          ],
+          pitfallTip:
+            'SQL 中的字符串条件必须使用英文单引号（例如 WHERE class_name = \'高一(1)班\'），不能用中文引号。',
+          demoTopic: isDml ? 'sql_dml' : isAgg ? 'sql_aggregate' : 'sql_select',
+          demoLabel: isDml
+            ? 'SQL 增删改操作演示'
+            : isAgg
+              ? 'SQL 聚合与分组统计演示'
+              : 'SQL SELECT 查询与排序演示',
+        };
+      }
+
+      case 'sql_table_state':
+        return {
+          concreteSteps: [
+            '在左侧查看目标表的现有字段顺序与当前记录内容。',
+            '按题目要求编写 INSERT / UPDATE / DELETE 语句（修改或删除前务必加上准确的 WHERE 条件！）。',
+            '点击「执行 SQL」，然后切换到左侧对应数据表确认记录条数和字段值已按要求变化。',
+          ],
+          pitfallTip:
+            '执行 UPDATE 或 DELETE 时如果漏掉 WHERE 条件，会导致整张表所有数据都被修改或清空！',
+          demoTopic: 'sql_dml',
+          demoLabel: 'SQL 数据插入、更新与删除演示',
+        };
+
+      default:
+        return {
+          concreteSteps: [
+            '检查 SELECT 后指定的列名顺序是否与题目要求一致（如果是统计题，注意使用 COUNT / AVG / SUM / MAX / MIN 函数）。',
+            '核对 FROM 表名、WHERE 筛选条件以及 ORDER BY 排序方向（ASC 升序 / DESC 降序）。',
+            '点击「执行 SQL」，核对下方「查询结果预览」表格中的列名与每一行数据是否正确。',
+          ],
+          pitfallTip:
+            '多条语句时系统只取最后一条 SELECT 的结果进行展示与判分，请确保最后的 SELECT 查询输出了题目要求的列。',
+          demoTopic: 'sql_select',
+          demoLabel: 'SQL 查询与结果验证演示',
+        };
+    }
+  }
+
   // File management
   if (cp.ruleType === 'file_exists') {
     if (p.itemType === 'shortcut') {
@@ -461,7 +564,11 @@ export function buildStepGuidance(
               ? 'excel_formula'
               : qType === 'web'
                 ? 'web_html'
-                : 'file_create',
+                : qType === 'python'
+                  ? 'python_io'
+                  : qType === 'database'
+                    ? 'sql_select'
+                    : 'file_create',
         demoLabel: '操作演示指南',
       };
     }
