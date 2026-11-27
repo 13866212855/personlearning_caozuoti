@@ -1368,6 +1368,7 @@ export default function TeacherQuestionStudioTab() {
                   value={trialState}
                   onChange={setTrialState}
                   assets={trialQ.materials.assets}
+                  historyKey={trialQ.id}
                 />
               </div>
             </div>

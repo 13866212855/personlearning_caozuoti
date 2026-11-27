@@ -14,6 +14,7 @@ import {
   HelpCircle,
   Loader2,
   PlayCircle,
+  RotateCcw,
   Save,
   Send,
   X,
@@ -93,6 +94,7 @@ function ExamContent() {
   const [draftMsg, setDraftMsg] = useState('');
 
   const [confirmSubmitOpen, setConfirmSubmitOpen] = useState(false);
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   // Per-step checking & beginner guidance state
@@ -468,6 +470,33 @@ function ExamContent() {
     return () => clearInterval(timer);
   }, [examInfo, resultView, questions.length, saveDraft]);
 
+  // 关闭/刷新页面前的兜底草稿保存（keepalive 保证请求不被页面卸载中断）
+  useEffect(() => {
+    if (!examInfo || resultView || questions.length === 0) return;
+    const onHide = () => {
+      try {
+        const token = getPortalToken();
+        void fetch(`/api/exams/${examInfo.id}/draft`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            answers: answersRef.current,
+            durationSeconds: elapsedRef.current,
+            switchCount: switchRef.current,
+          }),
+          keepalive: true,
+        });
+      } catch {
+        // 卸载阶段无法上报时忽略，定时草稿已兜底
+      }
+    };
+    window.addEventListener('pagehide', onHide);
+    return () => window.removeEventListener('pagehide', onHide);
+  }, [examInfo, resultView, questions.length]);
+
   // Anti-tab-switch warning
   useEffect(() => {
     if (!examInfo?.antiCheatSwitch || resultView || questions.length === 0) {
@@ -744,6 +773,27 @@ function ExamContent() {
     }, 750);
   };
 
+  // 重置本题：恢复初始状态。撤销历史层会把重置前的状态记入历史，
+  // 因此误点重置后仍可用 Ctrl+Z / 撤销按钮找回。
+  const handleResetCurrentQuestion = () => {
+    if (!currentQ) return;
+    const qIdSnapshot = currentQ.id;
+    setAnswers((prev) => ({
+      ...prev,
+      [qIdSnapshot]: structuredClone(currentQ.materials.initialState),
+    }));
+    setStepCheckByQ((prev) => {
+      const next = { ...prev };
+      delete next[qIdSnapshot];
+      return next;
+    });
+    setActiveStepByQ((prev) => ({
+      ...prev,
+      [qIdSnapshot]: firstStepIndex,
+    }));
+    setResetConfirmOpen(false);
+  };
+
   return (
     <div className="h-screen flex flex-col bg-slate-100 overflow-hidden">
       {/* Exam Top Bar */}
@@ -805,6 +855,15 @@ function ExamContent() {
           >
             <Save className="w-3.5 h-3.5" />
             <span>暂存</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setResetConfirmOpen(true)}
+            className="h-8 px-2.5 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-medium flex items-center gap-1"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>重置本题</span>
           </button>
 
           <div
@@ -1075,6 +1134,7 @@ function ExamContent() {
                 value={currentState}
                 onChange={handleSimulatorChange}
                 assets={currentQ.materials.assets}
+                historyKey={currentQ.id}
               />
             </section>
           </div>
@@ -1151,6 +1211,36 @@ function ExamContent() {
                 className="px-4 py-2 text-xs bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-semibold"
               >
                 确认交卷
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Question Confirmation Modal */}
+      {resetConfirmOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 w-full max-w-sm space-y-4">
+            <h3 className="text-base font-bold text-slate-900">
+              重置本题？
+            </h3>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              本题的模拟器内容将恢复到初始状态，当前所有修改会被清除。重置后如需找回，可使用模拟器上方的「撤销」按钮或 Ctrl+Z。
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setResetConfirmOpen(false)}
+                className="px-4 py-2 text-xs text-slate-600 hover:bg-slate-100 rounded-lg"
+              >
+                继续作答
+              </button>
+              <button
+                type="button"
+                onClick={handleResetCurrentQuestion}
+                className="px-4 py-2 text-xs bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-semibold"
+              >
+                确认重置
               </button>
             </div>
           </div>

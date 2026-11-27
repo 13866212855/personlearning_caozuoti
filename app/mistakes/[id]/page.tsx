@@ -19,6 +19,25 @@ function formatTime(sec: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+// 错题重做页没有服务端草稿，用 sessionStorage 在刷新/关闭页面后恢复作答
+function draftStorageKey(questionId: string): string {
+  return `mistake-redo-draft:${questionId}`;
+}
+
+function readLocalDraft(questionId: string): SimulatorState | null {
+  try {
+    const raw = sessionStorage.getItem(draftStorageKey(questionId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as SimulatorState;
+    }
+  } catch {
+    // 草稿损坏时忽略，按初始状态重开
+  }
+  return null;
+}
+
 export default function MistakeRedoPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -31,6 +50,8 @@ export default function MistakeRedoPage() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<SubmitResponse | null>(null);
+  const [restoredDraft, setRestoredDraft] = useState(false);
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
 
   useEffect(() => {
     if (!getPortalToken()) {
@@ -46,7 +67,11 @@ export default function MistakeRedoPage() {
         );
         if (cancelled) return;
         setQuestion(res.question);
-        setSimState(structuredClone(res.question.materials.initialState));
+        const draft = readLocalDraft(questionId);
+        setSimState(
+          draft || structuredClone(res.question.materials.initialState)
+        );
+        setRestoredDraft(Boolean(draft));
       } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : '无法加载错题');
@@ -67,6 +92,29 @@ export default function MistakeRedoPage() {
     return () => clearInterval(timer);
   }, [loading, question, submitResult]);
 
+  // 作答内容本地草稿：防抖后写入 sessionStorage，刷新/关闭页面后可恢复
+  useEffect(() => {
+    if (loading || !question || submitResult || !simState) return;
+    const timer = setTimeout(() => {
+      try {
+        sessionStorage.setItem(
+          draftStorageKey(question.id),
+          JSON.stringify(simState)
+        );
+      } catch {
+        // 存储配额不足时忽略
+      }
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [loading, question, submitResult, simState]);
+
+  const handleResetQuestion = () => {
+    if (!question) return;
+    setSimState(structuredClone(question.materials.initialState));
+    setRestoredDraft(false);
+    setResetConfirmOpen(false);
+  };
+
   const handleSubmit = async () => {
     if (!question || !simState || submitResult) return;
     setSubmitting(true);
@@ -80,6 +128,11 @@ export default function MistakeRedoPage() {
         }
       );
       setSubmitResult(res);
+      try {
+        sessionStorage.removeItem(draftStorageKey(question.id));
+      } catch {
+        // ignore
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : '判分提交失败');
     } finally {
@@ -142,9 +195,7 @@ export default function MistakeRedoPage() {
             <>
               <button
                 type="button"
-                onClick={() =>
-                  setSimState(structuredClone(question.materials.initialState))
-                }
+                onClick={() => setResetConfirmOpen(true)}
                 className="h-9 px-3 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-medium flex items-center gap-1.5 whitespace-nowrap"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
@@ -171,6 +222,19 @@ export default function MistakeRedoPage() {
       {error && (
         <div className="bg-red-50 border-b border-red-200 px-4 py-2 text-xs text-red-700">
           {error}
+        </div>
+      )}
+
+      {restoredDraft && !submitResult && (
+        <div className="bg-sky-50 border-b border-sky-200 px-4 py-2 text-xs text-sky-800 flex items-center justify-between gap-3">
+          <span>已自动恢复上次未提交的作答，刷新或关闭页面不会丢失。</span>
+          <button
+            type="button"
+            onClick={() => setResetConfirmOpen(true)}
+            className="underline underline-offset-2 shrink-0"
+          >
+            丢弃并重新开始
+          </button>
         </div>
       )}
 
@@ -233,9 +297,40 @@ export default function MistakeRedoPage() {
             }}
             assets={question.materials.assets}
             readOnly={Boolean(submitResult)}
+            historyKey={question.id}
           />
         </section>
       </div>
+
+      {/* Reset Confirmation Modal */}
+      {resetConfirmOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 w-full max-w-sm space-y-4">
+            <h3 className="text-base font-bold text-slate-900">
+              重置本题？
+            </h3>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              模拟器内容将恢复到初始状态，当前所有修改会被清除。重置后如需找回，可使用模拟器上方的「撤销」按钮或 Ctrl+Z。
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setResetConfirmOpen(false)}
+                className="px-4 py-2 text-xs text-slate-600 hover:bg-slate-100 rounded-lg"
+              >
+                继续作答
+              </button>
+              <button
+                type="button"
+                onClick={handleResetQuestion}
+                className="px-4 py-2 text-xs bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-semibold"
+              >
+                确认重置
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
