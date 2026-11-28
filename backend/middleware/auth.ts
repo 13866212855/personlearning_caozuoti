@@ -29,6 +29,7 @@ export interface PortalUser {
   studentNo: string;
   teacherId: string;
   classId: string;
+  subjectId: string;
   mustChangePassword: boolean;
 }
 
@@ -48,6 +49,7 @@ export interface AuthedRequest extends Request {
     id: string;
     username: string;
     realName: string;
+    subjectId: string;
   };
   admin?: {
     id: string;
@@ -121,6 +123,7 @@ interface UserDbRow {
   student_no: string;
   teacher_id: string;
   class_id: string;
+  subject_id: string;
   is_disabled: number;
   must_change_password: number;
   platform_user_id: number | null;
@@ -153,7 +156,7 @@ function verifyPortalUser(
     const row = db
       .prepare(
         `SELECT id, username, role, real_name, grade, class_name, student_no,
-                teacher_id, class_id, is_disabled, must_change_password,
+                teacher_id, class_id, subject_id, is_disabled, must_change_password,
                 platform_user_id, platform_status
          FROM users WHERE id = ?`
       )
@@ -197,6 +200,7 @@ function verifyPortalUser(
       studentNo: row.student_no,
       teacherId: row.teacher_id || '',
       classId: row.class_id || '',
+      subjectId: row.subject_id || '',
       mustChangePassword: Boolean(row.must_change_password),
     };
     req.user = user;
@@ -216,6 +220,7 @@ function verifyPortalUser(
         id: row.id,
         username: row.username,
         realName: row.real_name,
+        subjectId: row.subject_id || '',
       };
     }
     return user;

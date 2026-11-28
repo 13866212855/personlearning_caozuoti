@@ -1,4 +1,7 @@
 import type {
+  CircuitState,
+  ControlSystemState,
+  CraftProcessState,
   DatabaseState,
   ExcelCell,
   ExcelState,
@@ -6,6 +9,8 @@ import type {
   PythonState,
   QuestionType,
   SimulatorState,
+  Sketch3ViewState,
+  StructureState,
   WebState,
   WordParagraph,
   WordState,
@@ -293,6 +298,96 @@ export function describeChange(
           return { label: '编辑 SQL 语句', coalesceKey: 'db-sql', showToast: false };
         }
         return { label: '执行 SQL 查询', coalesceKey: null, showToast: false };
+      }
+      case 'sketch3view': {
+        const p = prev as Sketch3ViewState;
+        const n = next as Sketch3ViewState;
+        const pLines = p.lines?.length || 0;
+        const nLines = n.lines?.length || 0;
+        if (nLines < pLines) {
+          return { label: '已擦除视图图线', coalesceKey: null, showToast: true };
+        }
+        if (nLines > pLines) {
+          return { label: '已绘制视图图线', coalesceKey: null, showToast: false };
+        }
+        if (!jsonEq(p.dimensions, n.dimensions)) {
+          return { label: '修改尺寸标注', coalesceKey: 'sketch-dim', showToast: false };
+        }
+        return { label: '调整三视图草图', coalesceKey: null, showToast: false };
+      }
+      case 'circuit': {
+        const p = prev as CircuitState;
+        const n = next as CircuitState;
+        const pWires = p.wires?.length || 0;
+        const nWires = n.wires?.length || 0;
+        if (nWires < pWires) {
+          return { label: '已断开连接导线', coalesceKey: null, showToast: true };
+        }
+        if (nWires > pWires) {
+          return { label: '已连接导线', coalesceKey: null, showToast: false };
+        }
+        if (Boolean(p.powered) !== Boolean(n.powered)) {
+          return { label: n.powered ? '合上电源开关' : '断开电源开关', coalesceKey: null, showToast: false };
+        }
+        if (p.lightLevel !== n.lightLevel || p.tempC !== n.tempC) {
+          return { label: '调节环境模拟参数', coalesceKey: 'circuit-env', showToast: false };
+        }
+        return { label: '调节电路器件状态', coalesceKey: null, showToast: false };
+      }
+      case 'structure': {
+        const p = prev as StructureState;
+        const n = next as StructureState;
+        const pMembers = p.members?.length || 0;
+        const nMembers = n.members?.length || 0;
+        if (nMembers < pMembers) {
+          return { label: '已拆除加固杆件', coalesceKey: null, showToast: true };
+        }
+        if (nMembers > pMembers) {
+          return { label: '已加装结构杆件', coalesceKey: null, showToast: false };
+        }
+        if (p.jointType !== n.jointType) {
+          return { label: '切换连接方式', coalesceKey: null, showToast: false };
+        }
+        if (p.supportBaseWidth !== n.supportBaseWidth) {
+          return { label: '调整支承面宽度', coalesceKey: 'struct-base', showToast: false };
+        }
+        return { label: '调整结构与载荷参数', coalesceKey: 'struct-load', showToast: false };
+      }
+      case 'control': {
+        const p = prev as ControlSystemState;
+        const n = next as ControlSystemState;
+        if (p.mode !== n.mode) {
+          return {
+            label: n.mode === 'closed' ? '切换为闭环控制' : '切换为开环控制',
+            coalesceKey: null,
+            showToast: false,
+          };
+        }
+        if (Boolean(p.hasFeedbackEdge) !== Boolean(n.hasFeedbackEdge)) {
+          return {
+            label: n.hasFeedbackEdge ? '连接反馈通道' : '断开反馈通道',
+            coalesceKey: null,
+            showToast: false,
+          };
+        }
+        return { label: '设置控制系统框图环节', coalesceKey: null, showToast: false };
+      }
+      case 'craft': {
+        const p = prev as CraftProcessState;
+        const n = next as CraftProcessState;
+        if ((n.orderedSteps?.length || 0) < (p.orderedSteps?.length || 0)) {
+          return { label: '已移除工序步骤', coalesceKey: null, showToast: true };
+        }
+        if (!jsonEq(p.orderedSteps, n.orderedSteps)) {
+          return { label: '调整加工工序顺序', coalesceKey: null, showToast: false };
+        }
+        if (!jsonEq(p.selectedTools, n.selectedTools)) {
+          return { label: '选配加工工量具', coalesceKey: null, showToast: false };
+        }
+        if (p.caliperReading !== n.caliperReading) {
+          return { label: '修改卡尺读数', coalesceKey: 'craft-caliper', showToast: false };
+        }
+        return { label: '勾选安全操作规范', coalesceKey: null, showToast: false };
       }
       default:
         break;

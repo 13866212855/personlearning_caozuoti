@@ -5,10 +5,12 @@ import {
   generateInviteCode,
   getDb,
   getDefaultRegistrationTarget,
+  getPublicSubjectsConfig,
   logAdminAction,
   rowToQuestion,
   setDefaultRegistrationTarget,
 } from '../db';
+import { ALL_QUESTION_TYPES, getSubjectForType } from '../../lib/subjects';
 import { gradeAnswerDeterministic } from '../grader';
 import {
   type AuthedRequest,
@@ -35,6 +37,7 @@ import type {
 } from '../types';
 
 const router = Router();
+const QUESTION_TYPE_ENUM = ALL_QUESTION_TYPES as [QuestionType, ...QuestionType[]];
 
 // Super Admin Login ONLY (isolated from /login)
 router.post('/auth/login', loginRateLimiter, (req, res) => {
@@ -221,6 +224,11 @@ router.get('/overview', (_req, res) => {
     file: { sum: 0, count: 0 },
     python: { sum: 0, count: 0 },
     database: { sum: 0, count: 0 },
+    sketch3view: { sum: 0, count: 0 },
+    circuit: { sum: 0, count: 0 },
+    structure: { sum: 0, count: 0 },
+    control: { sum: 0, count: 0 },
+    craft: { sum: 0, count: 0 },
   };
 
   const legacyByType = db
@@ -267,10 +275,115 @@ router.get('/overview', (_req, res) => {
     avgScore: Math.round((avgPct || 0) * 10) / 10,
     submissionsByType: Object.entries(typeMap).map(([type, v]) => ({
       type,
+      subjectId: getSubjectForType(type as QuestionType),
       count: v.count,
       avgScore: v.count > 0 ? Math.round((v.sum / v.count) * 10) / 10 : 0,
     })),
   });
+});
+
+// ==================== Subject Pack Configuration ====================
+router.get('/subjects', (_req, res) => {
+  const db = getDb();
+  const cfg = getPublicSubjectsConfig(db);
+
+  const kpCounts = db
+    .prepare('SELECT subject_id, COUNT(*) as cnt FROM knowledge_points GROUP BY subject_id')
+    .all() as Array<{ subject_id: string; cnt: number }>;
+  const qCounts = db
+    .prepare('SELECT subject_id, COUNT(*) as cnt FROM questions GROUP BY subject_id')
+    .all() as Array<{ subject_id: string; cnt: number }>;
+  const examCounts = db
+    .prepare('SELECT subject_id, COUNT(*) as cnt FROM exams GROUP BY subject_id')
+    .all() as Array<{ subject_id: string; cnt: number }>;
+  const teacherCounts = db
+    .prepare("SELECT subject_id, COUNT(*) as cnt FROM users WHERE role = 'teacher' GROUP BY subject_id")
+    .all() as Array<{ subject_id: string; cnt: number }>;
+
+  const stats: Record<
+    string,
+    { kpCount: number; questionCount: number; examCount: number; teacherCount: number }
+  > = {};
+  for (const s of cfg.subjects) {
+    stats[s.id] = {
+      kpCount: kpCounts.find((r) => r.subject_id === s.id)?.cnt || 0,
+      questionCount: qCounts.find((r) => r.subject_id === s.id)?.cnt || 0,
+      examCount: examCounts.find((r) => r.subject_id === s.id)?.cnt || 0,
+      teacherCount: teacherCounts.find((r) => r.subject_id === s.id)?.cnt || 0,
+    };
+  }
+
+  res.json({
+    ...cfg,
+    stats,
+  });
+});
+
+router.put('/subjects', (req: AuthedRequest, res) => {
+  const schema = z.object({
+    subjects: z
+      .array(
+        z.object({
+          id: z.enum(['it', 'gt']),
+          isEnabled: z.boolean(),
+        })
+      )
+      .min(1),
+    defaultSubjectId: z.enum(['it', 'gt']),
+    customSiteTitle: z.string().trim().max(60).optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message || '学科配置参数无效' });
+    return;
+  }
+
+  const enabledList = parsed.data.subjects.filter((s) => s.isEnabled);
+  if (enabledList.length === 0) {
+    res.status(400).json({ error: '系统至少需要保留 1 个已启用学科' });
+    return;
+  }
+
+  const effectiveDefault = enabledList.some((s) => s.id === parsed.data.defaultSubjectId)
+    ? parsed.data.defaultSubjectId
+    : enabledList[0].id;
+
+  const db = getDb();
+  const now = new Date().toISOString();
+
+  db.transaction(() => {
+    const stmt = db.prepare(
+      'UPDATE subjects SET is_enabled = ?, is_default = ?, updated_at = ? WHERE id = ?'
+    );
+    for (const s of parsed.data.subjects) {
+      stmt.run(
+        s.isEnabled ? 1 : 0,
+        s.id === effectiveDefault ? 1 : 0,
+        now,
+        s.id
+      );
+    }
+
+    if (parsed.data.customSiteTitle !== undefined) {
+      db.prepare(
+        `INSERT INTO system_settings (key, value, updated_at)
+         VALUES ('site_title', ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+      ).run(parsed.data.customSiteTitle.trim(), now);
+    }
+  })();
+
+  const updated = getPublicSubjectsConfig(db);
+  logAdminAction(
+    req.admin!.id,
+    req.admin!.username,
+    '更新学科配置',
+    'subjects',
+    effectiveDefault,
+    `启用=${updated.enabledSubjects.map((s) => s.name).join('、')}，默认=${effectiveDefault}，标题=${updated.siteTitle}`
+  );
+
+  res.json({ ok: true, ...updated });
 });
 
 // ==================== LLM Configuration (strictly masks apiKey!) ====================
@@ -436,6 +549,7 @@ router.post('/llm-config/test-image', async (req, res) => {
 router.get('/questions', (req, res) => {
   const db = getDb();
   const keyword = String(req.query.keyword || '').trim();
+  const subjectId = String(req.query.subjectId || '');
   const type = String(req.query.type || '');
   const difficulty = String(req.query.difficulty || '');
   const status = String(req.query.status || '');
@@ -449,7 +563,11 @@ router.get('/questions', (req, res) => {
     where.push('(q.title LIKE ? OR q.scenario LIKE ? OR q.knowledge_points_json LIKE ?)');
     args.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
   }
-  if (type && ['word', 'excel', 'web', 'file', 'python', 'database'].includes(type)) {
+  if (subjectId && ['it', 'gt'].includes(subjectId)) {
+    where.push('q.subject_id = ?');
+    args.push(subjectId);
+  }
+  if (type && ALL_QUESTION_TYPES.includes(type as QuestionType)) {
     where.push('q.type = ?');
     args.push(type);
   }
@@ -510,7 +628,7 @@ router.get('/questions/:id', (req, res) => {
 router.post('/questions', (req: AuthedRequest, res) => {
   const schema = z.object({
     title: z.string().trim().min(2),
-    type: z.enum(['word', 'excel', 'web', 'file', 'python', 'database']),
+    type: z.enum(QUESTION_TYPE_ENUM),
     difficulty: z.enum(['基础', '中等', '提高']),
     knowledgePoints: z.array(z.string()).min(1),
     scenario: z.string().min(5),
@@ -533,17 +651,19 @@ router.post('/questions', (req: AuthedRequest, res) => {
 
   const db = getDb();
   const id = `manual-${parsed.data.type}-${Date.now()}`;
+  const subjectId = getSubjectForType(parsed.data.type);
   const now = new Date().toISOString();
 
   db.prepare(
     `INSERT INTO questions (
-      id, title, type, difficulty, knowledge_points_json, knowledge_point_ids_json, scenario,
+      id, subject_id, title, type, difficulty, knowledge_points_json, knowledge_point_ids_json, scenario,
       total_score, materials_json, steps_json, checkpoints_json,
       reference_answer_json, analysis_json, common_mistakes_json,
       status, source, owner_id, visibility, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'seed', 'system', ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'seed', 'system', ?, ?, ?)`
   ).run(
     id,
+    subjectId,
     parsed.data.title,
     parsed.data.type,
     parsed.data.difficulty,
@@ -586,16 +706,19 @@ router.put('/questions/:id', (req: AuthedRequest, res) => {
 
   const body = req.body || {};
   const now = new Date().toISOString();
+  const nextType = (body.type ?? existing.type) as QuestionType;
+  const nextSubjectId = getSubjectForType(nextType);
   db.prepare(
     `UPDATE questions SET
-      title = ?, type = ?, difficulty = ?, knowledge_points_json = ?,
+      subject_id = ?, title = ?, type = ?, difficulty = ?, knowledge_points_json = ?,
       scenario = ?, total_score = ?, materials_json = ?, steps_json = ?,
       checkpoints_json = ?, reference_answer_json = ?, analysis_json = ?,
       common_mistakes_json = ?, status = ?, visibility = ?, updated_at = ?
      WHERE id = ?`
   ).run(
+    nextSubjectId,
     body.title ?? existing.title,
-    body.type ?? existing.type,
+    nextType,
     body.difficulty ?? existing.difficulty,
     body.knowledgePoints
       ? JSON.stringify(body.knowledgePoints)
@@ -687,7 +810,7 @@ router.delete('/questions/:id', (req: AuthedRequest, res) => {
 
 router.post('/questions/batch-generate', (req: AuthedRequest, res) => {
   const schema = z.object({
-    type: z.enum(['word', 'excel', 'web', 'file', 'python', 'database']),
+    type: z.enum(QUESTION_TYPE_ENUM),
     difficulty: z.enum(['基础', '中等', '提高']),
     count: z.number().int().min(1).max(10),
     knowledgePoint: z.string().trim().optional(),
@@ -765,13 +888,14 @@ async function runBatchGenerationJob(
 
       db.prepare(
         `INSERT INTO questions (
-          id, title, type, difficulty, knowledge_points_json, knowledge_point_ids_json, scenario,
+          id, subject_id, title, type, difficulty, knowledge_points_json, knowledge_point_ids_json, scenario,
           total_score, materials_json, steps_json, checkpoints_json,
           reference_answer_json, analysis_json, common_mistakes_json,
           status, source, owner_id, visibility, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'system', 'public', ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'system', 'public', ?, ?)`
       ).run(
         q.id,
+        q.subjectId || getSubjectForType(q.type),
         q.title,
         q.type,
         q.difficulty,
@@ -909,7 +1033,7 @@ router.get('/submissions', (req, res) => {
     where.push('st.class_name LIKE ?');
     args.push(`%${className}%`);
   }
-  if (type && ['word', 'excel', 'web', 'file', 'python', 'database'].includes(type)) {
+  if (type && ALL_QUESTION_TYPES.includes(type as QuestionType)) {
     where.push('q.type = ?');
     args.push(type);
   }
@@ -1246,6 +1370,7 @@ router.get('/exams', (req, res) => {
 
     return {
       id: e.id,
+      subjectId: String(e.subject_id || 'it'),
       title: e.title,
       teacherName: e.teacher_name || e.teacher_username || '未知教师',
       status: e.status,
@@ -1420,6 +1545,7 @@ router.get('/users', (req, res) => {
         teacherId: r.teacher_id || '',
         teacherName: r.teacher_name || r.teacher_username || '',
         classId: r.class_id || '',
+        subjectId: String(r.subject_id || ''),
         isDisabled: Boolean(r.is_disabled),
         mustChangePassword: Boolean(r.must_change_password),
         platformUserId: r.platform_user_id ?? null,
@@ -1502,7 +1628,7 @@ function createTeacherAssignedExam(
   const qPlaceholders = uniqueQuestionIds.map(() => '?').join(', ');
   const qRows = db
     .prepare(
-      `SELECT id, title, total_score
+      `SELECT id, title, total_score, subject_id
        FROM questions
        WHERE status = 'published' AND id IN (${qPlaceholders})`
     )
@@ -1510,12 +1636,13 @@ function createTeacherAssignedExam(
     id: string;
     title: string;
     total_score: number;
+    subject_id: string;
   }>;
 
   const qMap = new Map(qRows.map((q) => [q.id, q]));
   const orderedQuestions = uniqueQuestionIds
     .map((id) => qMap.get(id))
-    .filter((q): q is { id: string; title: string; total_score: number } =>
+    .filter((q): q is { id: string; title: string; total_score: number; subject_id: string } =>
       Boolean(q)
     );
   if (orderedQuestions.length === 0) {
@@ -1535,14 +1662,19 @@ function createTeacherAssignedExam(
         ? `操作练习：${orderedQuestions[0].title}`.slice(0, 78)
         : `会考操作题专项练习（共 ${orderedQuestions.length} 题）`;
 
+  const examSubjectId = orderedQuestions[0]?.id
+    ? (qMap.get(orderedQuestions[0].id)?.subject_id || 'it')
+    : 'it';
+
   db.prepare(
     `INSERT INTO exams (
-      id, title, description, teacher_id, duration, start_time, end_time,
+      id, subject_id, title, description, teacher_id, duration, start_time, end_time,
       max_attempts, score_policy, show_score_immediately, show_answer_policy,
       shuffle, anti_cheat_switch, allow_late, status, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'highest', 1, 'immediate', 0, 0, 1, 'published', ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'highest', 1, 'immediate', 0, 0, 1, 'published', ?, ?)`
   ).run(
     examId,
+    examSubjectId,
     examTitle,
     '管理员或教师分配的操作题练习任务，可反复练习并即时查看判分与解析。',
     params.teacherId,
@@ -1622,6 +1754,7 @@ router.post('/users/teacher', async (req: AuthedRequest, res) => {
     password: z.string().min(6, '初始密码至少 6 位').max(64),
     defaultClassName: z.string().trim().max(40).default('高一(1)班'),
     defaultGrade: z.string().trim().max(20).default('高一'),
+    subjectId: z.enum(['', 'it', 'gt']).default(''),
     setAsDefaultRegistration: z.boolean().default(false),
     assignStarterQuestions: z.boolean().default(true),
     starterQuestionIds: z.array(z.string().trim().min(1)).max(30).optional(),
@@ -1660,14 +1793,28 @@ router.post('/users/teacher', async (req: AuthedRequest, res) => {
   ) {
     starterIds = parsed.data.starterQuestionIds;
   } else if (parsed.data.assignStarterQuestions) {
-    const seedRows = db
-      .prepare(
-        `SELECT id FROM questions
-         WHERE status = 'published' AND visibility IN ('public', 'shared')
-         ORDER BY CASE WHEN owner_id = 'system' THEN 0 ELSE 1 END, created_at ASC
-         LIMIT 4`
-      )
-      .all() as Array<{ id: string }>;
+    const subjFilter = parsed.data.subjectId
+      ? 'AND subject_id = ?'
+      : '';
+    const seedRows = (
+      parsed.data.subjectId
+        ? db
+            .prepare(
+              `SELECT id FROM questions
+               WHERE status = 'published' AND visibility IN ('public', 'shared') ${subjFilter}
+               ORDER BY CASE WHEN owner_id = 'system' THEN 0 ELSE 1 END, created_at ASC
+               LIMIT 4`
+            )
+            .all(parsed.data.subjectId)
+        : db
+            .prepare(
+              `SELECT id FROM questions
+               WHERE status = 'published' AND visibility IN ('public', 'shared')
+               ORDER BY CASE WHEN owner_id = 'system' THEN 0 ELSE 1 END, created_at ASC
+               LIMIT 4`
+            )
+            .all()
+    ) as Array<{ id: string }>;
     starterIds = seedRows.map((r) => r.id);
   }
 
@@ -1681,10 +1828,18 @@ router.post('/users/teacher', async (req: AuthedRequest, res) => {
     db.prepare(
       `INSERT INTO users (
         id, username, password_hash, role, real_name, grade, class_name,
-        student_no, teacher_id, class_id, is_disabled, must_change_password,
+        student_no, teacher_id, class_id, subject_id, is_disabled, must_change_password,
         created_at, updated_at
-      ) VALUES (?, ?, ?, 'teacher', ?, '', '', '', '', '', 0, 1, ?, ?)`
-    ).run(teacherId, parsed.data.username, hash, parsed.data.realName, now, now);
+      ) VALUES (?, ?, ?, 'teacher', ?, '', '', '', '', '', ?, 0, 1, ?, ?)`
+    ).run(
+      teacherId,
+      parsed.data.username,
+      hash,
+      parsed.data.realName,
+      parsed.data.subjectId || '',
+      now,
+      now
+    );
 
     db.prepare(
       `INSERT INTO classes (id, name, grade, teacher_id, invite_code, created_at, updated_at)
@@ -1970,6 +2125,44 @@ router.patch('/users/:id/status', (req: AuthedRequest, res) => {
   );
 
   res.json({ ok: true });
+});
+
+router.patch('/users/:id/subject', (req: AuthedRequest, res) => {
+  const schema = z.object({
+    subjectId: z.enum(['', 'it', 'gt']),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: '学科参数无效' });
+    return;
+  }
+
+  const db = getDb();
+  const targetId = String(req.params.id);
+  const user = db
+    .prepare("SELECT id, username, role FROM users WHERE id = ? AND role = 'teacher'")
+    .get(targetId) as { id: string; username: string; role: UserRole } | undefined;
+  if (!user) {
+    res.status(404).json({ error: '教师账号不存在' });
+    return;
+  }
+
+  db.prepare('UPDATE users SET subject_id = ?, updated_at = ? WHERE id = ?').run(
+    parsed.data.subjectId,
+    new Date().toISOString(),
+    targetId
+  );
+
+  logAdminAction(
+    req.admin!.id,
+    req.admin!.username,
+    '设置教师默认学科',
+    'user',
+    targetId,
+    `${user.username} -> ${parsed.data.subjectId || '全学科'}`
+  );
+
+  res.json({ ok: true, subjectId: parsed.data.subjectId });
 });
 
 router.post('/users/:id/reset-password', (req: AuthedRequest, res) => {

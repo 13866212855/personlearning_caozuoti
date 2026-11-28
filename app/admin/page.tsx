@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
+  BookOpen,
   Bot,
   ClipboardList,
   Database,
@@ -23,6 +24,7 @@ import AdminOverviewTab from '@/components/admin/AdminOverviewTab';
 import AdminPasswordTab from '@/components/admin/AdminPasswordTab';
 import AdminPlatformTab from '@/components/admin/AdminPlatformTab';
 import AdminQuestionsTab from '@/components/admin/AdminQuestionsTab';
+import AdminSubjectsTab from '@/components/admin/AdminSubjectsTab';
 import AdminSubmissionsTab from '@/components/admin/AdminSubmissionsTab';
 import AdminUsersTab from '@/components/admin/AdminUsersTab';
 import { useAuthConfig } from '@/hooks/useAuthConfig';
@@ -35,6 +37,7 @@ import {
 
 type AdminTab =
   | 'overview'
+  | 'subjects'
   | 'users'
   | 'platform'
   | 'exams'
@@ -180,6 +183,7 @@ export default function AdminPortalPage() {
   const menuItems: Array<{ id: AdminTab; label: string; icon: typeof LayoutDashboard }> =
     [
       { id: 'overview', label: '数据概览', icon: LayoutDashboard },
+      { id: 'subjects', label: '学科配置', icon: BookOpen },
       { id: 'users', label: '用户与角色', icon: Users },
       ...(platformMode
         ? [{ id: 'platform' as AdminTab, label: '平台对接', icon: Globe }]
@@ -198,7 +202,7 @@ export default function AdminPortalPage() {
       <header className="h-14 bg-white border-b border-slate-200 px-6 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2.5 text-base font-bold text-slate-900">
           <Shield className="w-5 h-5 text-sky-700" />
-          <span>会考操作题系统 · 管理控制台</span>
+          <span>{auth?.siteTitle || '会考操作题系统'} · 管理控制台</span>
         </div>
         <div className="flex items-center gap-4 text-xs">
           <span className="text-slate-600">当前管理员：{admin.username}</span>
@@ -267,6 +271,7 @@ export default function AdminPortalPage() {
 
         <main className="flex-1 p-5 sm:p-7 min-w-0">
           {activeTab === 'overview' && <AdminOverviewTab />}
+          {activeTab === 'subjects' && <AdminSubjectsTab />}
           {activeTab === 'users' && <AdminUsersTab />}
           {activeTab === 'platform' && <AdminPlatformTab />}
           {activeTab === 'exams' && <AdminExamsTab />}

@@ -375,6 +375,7 @@ export interface PortalUserPayload {
   teacherId: string;
   teacherName: string;
   classId: string;
+  subjectId: string;
   mustChangePassword: boolean;
   unreadNotifications: number;
   platformRole: string;
@@ -388,7 +389,7 @@ export function loadPortalUserPayload(
   const row = db
     .prepare(
       `SELECT id, username, role, real_name, grade, class_name, student_no, teacher_id,
-              class_id, must_change_password, platform_role
+              class_id, subject_id, must_change_password, platform_role
        FROM users WHERE id = ?`
     )
     .get(userId) as
@@ -402,6 +403,7 @@ export function loadPortalUserPayload(
         student_no: string;
         teacher_id: string;
         class_id: string;
+        subject_id: string;
         must_change_password: number;
         platform_role: string;
       }
@@ -442,6 +444,7 @@ export function loadPortalUserPayload(
     teacherId: row.teacher_id || '',
     teacherName,
     classId: row.class_id || '',
+    subjectId: row.subject_id || '',
     mustChangePassword: Boolean(row.must_change_password),
     unreadNotifications: Number(unread?.cnt || 0),
     platformRole: row.platform_role || '',

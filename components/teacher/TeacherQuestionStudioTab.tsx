@@ -25,7 +25,14 @@ import {
   Zap,
 } from 'lucide-react';
 import SimulatorRenderer from '@/components/simulators/SimulatorRenderer';
-import { portalFetch } from '@/lib/api';
+import { useAuthConfig } from '@/hooks/useAuthConfig';
+import { getCachedPortalUser, portalFetch } from '@/lib/api';
+import {
+  getSubjectForType,
+  getSubjectTypes,
+  SUBJECT_LABELS,
+  SUBJECT_PACKS,
+} from '@/lib/subjects';
 import {
   TYPE_LABELS,
   type CheckpointResult,
@@ -34,6 +41,7 @@ import {
   type KnowledgePointItem,
   type QuestionType,
   type SimulatorState,
+  type SubjectId,
 } from '@/lib/types';
 
 interface PreviewQuestion extends FullQuestion {
@@ -52,6 +60,35 @@ function createEmptySimulatorState(type: QuestionType): SimulatorState {
       return { code: '', customInput: '', lastOutput: '', lastError: '' };
     case 'database':
       return { tables: [], sql: '', lastColumns: [], lastRows: [], lastChanges: 0, lastError: '' };
+    case 'sketch3view':
+      return { gridCols: 10, gridRows: 10, givenLines: [], lines: [], dimensions: [] };
+    case 'circuit':
+      return { components: [], wires: [], powered: false, lightLevel: 50, tempC: 25 };
+    case 'structure':
+      return {
+        nodes: [],
+        baseMembers: [],
+        members: [],
+        jointType: 'rigid',
+        supportBaseWidth: 120,
+        testLoadN: 50,
+      };
+    case 'control':
+      return {
+        mode: 'closed',
+        availableOptions: [],
+        slots: { input: '', controller: '', actuator: '', plant: '', output: '' },
+        hasFeedbackEdge: false,
+      };
+    case 'craft':
+      return {
+        availableSteps: [],
+        orderedSteps: [],
+        availableTools: [],
+        selectedTools: {},
+        safetyOptions: [],
+        safetyChecks: [],
+      };
     case 'word':
     default:
       return {
@@ -167,12 +204,86 @@ const ANHUI_KP_PRESETS: Record<
       kpIds: ['kp-db-4', 'kp-db-5', 'kp-db-6', 'kp-db-7'],
     },
   ],
+  sketch3view: [
+    {
+      label: '会考高频：三视图补画实线与虚线',
+      kpIds: ['kp-gt-sketch-1', 'kp-gt-sketch-2', 'kp-gt-sketch-3', 'kp-gt-sketch-4'],
+    },
+    {
+      label: '会考高频：组合体尺寸标注与中心线',
+      kpIds: ['kp-gt-sketch-5', 'kp-gt-sketch-6', 'kp-gt-sketch-8', 'kp-gt-sketch-9'],
+    },
+  ],
+  circuit: [
+    {
+      label: '会考高频：光敏/热敏传感器开关控制',
+      kpIds: ['kp-gt-circuit-1', 'kp-gt-circuit-2', 'kp-gt-circuit-5', 'kp-gt-circuit-8'],
+    },
+    {
+      label: '会考高频：三极管与继电器负载回路',
+      kpIds: ['kp-gt-circuit-3', 'kp-gt-circuit-5', 'kp-gt-circuit-7', 'kp-gt-circuit-9'],
+    },
+  ],
+  structure: [
+    {
+      label: '会考高频：三角形斜撑加固与稳定性',
+      kpIds: ['kp-gt-structure-1', 'kp-gt-structure-3', 'kp-gt-structure-4', 'kp-gt-structure-8'],
+    },
+    {
+      label: '会考高频：材料选型与连接方式对比',
+      kpIds: ['kp-gt-structure-5', 'kp-gt-structure-6', 'kp-gt-structure-7', 'kp-gt-structure-9'],
+    },
+  ],
+  control: [
+    {
+      label: '会考高频：闭环控制框图与反馈环节',
+      kpIds: ['kp-gt-control-4', 'kp-gt-control-5', 'kp-gt-control-6', 'kp-gt-control-7'],
+    },
+    {
+      label: '会考高频：开环控制辨析与干扰分析',
+      kpIds: ['kp-gt-control-2', 'kp-gt-control-3', 'kp-gt-control-8', 'kp-gt-control-9'],
+    },
+  ],
+  craft: [
+    {
+      label: '会考高频：金工加工时序与工量具匹配',
+      kpIds: ['kp-gt-craft-1', 'kp-gt-craft-2', 'kp-gt-craft-3', 'kp-gt-craft-4'],
+    },
+    {
+      label: '会考高频：游标卡尺读数与钻孔安全',
+      kpIds: ['kp-gt-craft-5', 'kp-gt-craft-7', 'kp-gt-craft-8', 'kp-gt-craft-9'],
+    },
+  ],
 };
 
 export default function TeacherQuestionStudioTab() {
+  const auth = useAuthConfig();
+  const enabledSubjects: SubjectId[] =
+    auth?.enabledSubjects && auth.enabledSubjects.length > 0
+      ? auth.enabledSubjects.map((s) => s.id)
+      : ['it', 'gt'];
+
   const [subTab, setSubTab] = useState<'ai' | 'bank'>('ai');
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
+
+  const [subjectOverride, setSubjectOverride] = useState<SubjectId | null>(null);
+  const activeSubject: SubjectId = (() => {
+    if (subjectOverride && enabledSubjects.includes(subjectOverride)) {
+      return subjectOverride;
+    }
+    const cachedSubject = getCachedPortalUser()?.subjectId;
+    if (
+      (cachedSubject === 'it' || cachedSubject === 'gt') &&
+      enabledSubjects.includes(cachedSubject)
+    ) {
+      return cachedSubject;
+    }
+    if (auth?.defaultSubjectId && enabledSubjects.includes(auth.defaultSubjectId)) {
+      return auth.defaultSubjectId;
+    }
+    return enabledSubjects[0] || 'it';
+  })();
 
   // Knowledge points & AI Quota
   const [kps, setKps] = useState<KnowledgePointItem[]>([]);
@@ -185,7 +296,15 @@ export default function TeacherQuestionStudioTab() {
 
   // AI Form
   const [genMode, setGenMode] = useState<'ai' | 'template'>('ai');
-  const [aiType, setAiType] = useState<QuestionType>('excel');
+  const [aiTypeState, setAiType] = useState<QuestionType>(() => {
+    const cachedSubject = getCachedPortalUser()?.subjectId;
+    return cachedSubject === 'gt' ? 'sketch3view' : 'excel';
+  });
+  const aiType: QuestionType = getSubjectTypes(activeSubject).includes(aiTypeState)
+    ? aiTypeState
+    : activeSubject === 'gt'
+      ? 'sketch3view'
+      : 'excel';
   const [difficulty, setDifficulty] = useState<DifficultyLevel>('中等');
   const [count, setCount] = useState(1);
   const [stepCount, setStepCount] = useState(4);
@@ -199,6 +318,7 @@ export default function TeacherQuestionStudioTab() {
 
   // Bank list
   const [scope, setScope] = useState<'all' | 'mine' | 'system' | 'shared'>('all');
+  const [bankSubject, setBankSubject] = useState<'' | SubjectId>('');
   const [bankType, setBankType] = useState('');
   const [bankDiff, setBankDiff] = useState('');
   const [bankKeyword, setBankKeyword] = useState('');
@@ -251,6 +371,7 @@ export default function TeacherQuestionStudioTab() {
           page: String(page),
           pageSize: '10',
         });
+        if (bankSubject) qs.set('subjectId', bankSubject);
         if (bankType) qs.set('type', bankType);
         if (bankDiff) qs.set('difficulty', bankDiff);
         if (bankKeyword.trim()) qs.set('keyword', bankKeyword.trim());
@@ -268,7 +389,7 @@ export default function TeacherQuestionStudioTab() {
         setBankLoading(false);
       }
     },
-    [scope, bankType, bankDiff, bankKeyword, bankPage]
+    [scope, bankSubject, bankType, bankDiff, bankKeyword, bankPage]
   );
 
   useEffect(() => {
@@ -305,6 +426,7 @@ export default function TeacherQuestionStudioTab() {
       page: '1',
       pageSize: '10',
     });
+    if (bankSubject) qs.set('subjectId', bankSubject);
     if (bankType) qs.set('type', bankType);
     if (bankDiff) qs.set('difficulty', bankDiff);
     portalFetch<{
@@ -324,7 +446,7 @@ export default function TeacherQuestionStudioTab() {
     return () => {
       active = false;
     };
-  }, [subTab, scope, bankType, bankDiff]);
+  }, [subTab, scope, bankSubject, bankType, bankDiff]);
 
   const kpCountByType = useMemo(() => {
     const counts: Record<QuestionType, number> = {
@@ -334,6 +456,11 @@ export default function TeacherQuestionStudioTab() {
       file: 0,
       python: 0,
       database: 0,
+      sketch3view: 0,
+      circuit: 0,
+      structure: 0,
+      control: 0,
+      craft: 0,
     };
     for (const k of kps) {
       if (k.type in counts) counts[k.type] += 1;
@@ -864,10 +991,47 @@ export default function TeacherQuestionStudioTab() {
               </button>
             </div>
 
+            {enabledSubjects.length > 1 && (
+              <div className="space-y-1.5">
+                <label className="block font-medium text-slate-700">选择学科</label>
+                <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-slate-100 border border-slate-200">
+                  {enabledSubjects.map((sid) => {
+                    const active = activeSubject === sid;
+                    return (
+                      <button
+                        key={sid}
+                        type="button"
+                        onClick={() => {
+                          setSubjectOverride(sid);
+                          const nextTypes = getSubjectTypes(sid);
+                          if (!nextTypes.includes(aiType)) {
+                            setAiType(sid === 'gt' ? 'sketch3view' : 'excel');
+                            setSelectedKpIds([]);
+                            setKpFilter('');
+                          }
+                        }}
+                        className={`h-8 px-2.5 rounded-lg font-medium transition-colors whitespace-nowrap ${
+                          active
+                            ? sid === 'gt'
+                              ? 'bg-white text-teal-700 shadow-xs'
+                              : 'bg-white text-sky-700 shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        {SUBJECT_LABELS[sid]}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1.5">
-              <label className="block font-medium text-slate-700">1. 选择题型（高中信息技术会考全 6 类操作模块）</label>
+              <label className="block font-medium text-slate-700">
+                1. 选择题型（{SUBJECT_LABELS[activeSubject]}全 {getSubjectTypes(activeSubject).length} 类操作模块）
+              </label>
               <div className="grid grid-cols-2 gap-2">
-                {(['word', 'excel', 'web', 'file', 'python', 'database'] as QuestionType[]).map((t) => (
+                {getSubjectTypes(activeSubject).map((t) => (
                   <button
                     key={t}
                     type="button"
@@ -878,7 +1042,9 @@ export default function TeacherQuestionStudioTab() {
                     }}
                     className={`px-3 py-2 rounded-lg border text-left transition-colors ${
                       aiType === t
-                        ? 'border-sky-600 bg-sky-50 text-sky-800'
+                        ? activeSubject === 'gt'
+                          ? 'border-teal-600 bg-teal-50 text-teal-900'
+                          : 'border-sky-600 bg-sky-50 text-sky-800'
                         : 'border-slate-200 hover:bg-slate-50 text-slate-700'
                     }`}
                   >
@@ -1416,17 +1582,44 @@ export default function TeacherQuestionStudioTab() {
 
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <select
+                value={bankSubject}
+                onChange={(e) => {
+                  const nextSubj = e.target.value as '' | SubjectId;
+                  setBankSubject(nextSubj);
+                  if (nextSubj && bankType && getSubjectForType(bankType as QuestionType) !== nextSubj) {
+                    setBankType('');
+                  }
+                }}
+                className="h-8 px-2.5 border border-slate-200 rounded-lg bg-white"
+              >
+                <option value="">全部学科</option>
+                <option value="it">高中信息技术</option>
+                <option value="gt">高中通用技术</option>
+              </select>
+              <select
                 value={bankType}
                 onChange={(e) => setBankType(e.target.value)}
                 className="h-8 px-2.5 border border-slate-200 rounded-lg bg-white"
               >
                 <option value="">全部题型</option>
-                <option value="word">Word 文字处理</option>
-                <option value="excel">Excel 电子表格</option>
-                <option value="web">网页制作</option>
-                <option value="file">文件与文件夹</option>
-                <option value="python">Python 程序设计</option>
-                <option value="database">数据库与 SQL 查询</option>
+                {(!bankSubject || bankSubject === 'it') && (
+                  <optgroup label="高中信息技术">
+                    {SUBJECT_PACKS.it.questionTypes.map((t) => (
+                      <option key={t} value={t}>
+                        {TYPE_LABELS[t]}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {(!bankSubject || bankSubject === 'gt') && (
+                  <optgroup label="高中通用技术">
+                    {SUBJECT_PACKS.gt.questionTypes.map((t) => (
+                      <option key={t} value={t}>
+                        {TYPE_LABELS[t]}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
               <select
                 value={bankDiff}
@@ -1537,7 +1730,9 @@ export default function TeacherQuestionStudioTab() {
                         </td>
                         <td className="py-3 px-4 whitespace-nowrap">
                           <div className="text-slate-800">{TYPE_LABELS[q.type]}</div>
-                          <div className="text-[11px] text-slate-500">{q.difficulty}</div>
+                          <div className="text-[11px] text-slate-500">
+                            {SUBJECT_LABELS[q.subjectId || getSubjectForType(q.type)]} · {q.difficulty}
+                          </div>
                         </td>
                         <td className="py-3 px-4 whitespace-nowrap">
                           <div className="text-slate-700">{q.ownerName || '系统'}</div>

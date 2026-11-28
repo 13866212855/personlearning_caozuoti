@@ -16,7 +16,12 @@ import {
 } from 'lucide-react';
 import { adminFetch } from '@/lib/api';
 import { useAuthConfig } from '@/hooks/useAuthConfig';
-import { TYPE_LABELS, type QuestionType, type UserRole } from '@/lib/types';
+import {
+  TYPE_LABELS,
+  type QuestionType,
+  type SubjectId,
+  type UserRole,
+} from '@/lib/types';
 
 interface TeacherClassBrief {
   id: string;
@@ -35,6 +40,7 @@ interface AdminUserRow {
   teacherId: string;
   teacherName: string;
   classId: string;
+  subjectId?: SubjectId | '';
   isDisabled: boolean;
   mustChangePassword: boolean;
   isDefaultRegistrationTeacher?: boolean;
@@ -106,6 +112,7 @@ export default function AdminUsersTab() {
     password: '',
     defaultGrade: '高一',
     defaultClassName: '高一(1)班',
+    subjectId: '' as '' | SubjectId,
     setAsDefaultRegistration: false,
     assignStarterQuestions: true,
   });
@@ -258,6 +265,7 @@ export default function AdminUsersTab() {
         password: '',
         defaultGrade: '高一',
         defaultClassName: '高一(1)班',
+        subjectId: '',
         setAsDefaultRegistration: false,
         assignStarterQuestions: true,
       });
@@ -368,6 +376,31 @@ export default function AdminUsersTab() {
       void load(page);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '状态修改失败');
+    }
+  };
+
+  const handleUpdateTeacherSubject = async (
+    u: AdminUserRow,
+    nextSubjectId: '' | SubjectId
+  ) => {
+    setErr('');
+    try {
+      await adminFetch(`/api/admin/users/${u.id}/subject`, {
+        method: 'PATCH',
+        body: JSON.stringify({ subjectId: nextSubjectId }),
+      });
+      setMsg(
+        `已设置教师「${u.realName || u.username}」默认工作台学科为：${
+          nextSubjectId === 'gt'
+            ? '高中通用技术'
+            : nextSubjectId === 'it'
+              ? '高中信息技术'
+              : '全学科'
+        }`
+      );
+      void load(page);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '修改教师学科归属失败');
     }
   };
 
@@ -642,7 +675,7 @@ export default function AdminUsersTab() {
                           )}
                         </div>
                       ) : u.role === 'teacher' ? (
-                        <div className="space-y-1">
+                        <div className="space-y-1.5">
                           <div>
                             {u.teacherClasses && u.teacherClasses.length > 0
                               ? `${u.teacherClasses.length} 个班级（${u.teacherClasses
@@ -652,6 +685,23 @@ export default function AdminUsersTab() {
                                   u.teacherClasses.length > 2 ? '…' : ''
                                 }）`
                               : '暂无班级'}
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] text-slate-400">学科：</span>
+                            <select
+                              value={u.subjectId || ''}
+                              onChange={(e) =>
+                                void handleUpdateTeacherSubject(
+                                  u,
+                                  e.target.value as '' | SubjectId
+                                )
+                              }
+                              className="h-6 px-1.5 rounded border border-slate-200 bg-white text-[11px] text-slate-700"
+                            >
+                              <option value="">全学科</option>
+                              <option value="it">高中信息技术</option>
+                              <option value="gt">高中通用技术</option>
+                            </select>
                           </div>
                           {u.isDefaultRegistrationTeacher && (
                             <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-teal-50 border border-teal-200 text-[11px] font-semibold text-teal-700">
@@ -857,7 +907,7 @@ export default function AdminUsersTab() {
                 className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm"
               />
             </label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <label className="block space-y-1">
                 <span className="font-medium text-slate-700">默认年级</span>
                 <input
@@ -879,6 +929,23 @@ export default function AdminUsersTab() {
                   }
                   className="w-full h-9 px-2.5 border border-slate-300 rounded-lg"
                 />
+              </label>
+              <label className="block space-y-1">
+                <span className="font-medium text-slate-700">负责学科</span>
+                <select
+                  value={tForm.subjectId}
+                  onChange={(e) =>
+                    setTForm({
+                      ...tForm,
+                      subjectId: e.target.value as '' | SubjectId,
+                    })
+                  }
+                  className="w-full h-9 px-2 border border-slate-300 rounded-lg bg-white"
+                >
+                  <option value="">全学科</option>
+                  <option value="it">高中信息技术</option>
+                  <option value="gt">高中通用技术</option>
+                </select>
               </label>
             </div>
 

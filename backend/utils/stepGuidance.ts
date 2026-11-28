@@ -472,6 +472,212 @@ function buildGuidanceForCheckpoint(
     }
   }
 
+  if (qType === 'sketch3view') {
+    const viewNameMap: Record<string, string> = {
+      front: '主视图（正前方）',
+      top: '俯视图（正上方）',
+      left: '左视图（正左方）',
+    };
+    const styleNameMap: Record<string, string> = {
+      solid: '粗实线（可见轮廓线）',
+      dashed: '虚线（不可见轮廓线）',
+      center: '点画线（对称中心轴）',
+    };
+    switch (cp.ruleType) {
+      case 'sketch_dimension_match':
+        return {
+          concreteSteps: [
+            `在右侧画板下方的「尺寸标注」栏找到对应视图（${viewNameMap[String(p.view || 'front')] || '目标视图'}）的标注输入框。`,
+            `填入准确尺寸数值（如 ${String(p.expectedValue || '')}，单位默认 mm 可直接填数字）。`,
+          ],
+          pitfallTip:
+            '三视图尺寸标注遵循“长对正、高平齐、宽相等”：主视图反映长和高，俯视图反映长和宽，左视图反映高和宽。',
+          demoTopic: 'sketch_3view',
+          demoLabel: '三视图补线与尺寸标注演示',
+        };
+      case 'sketch_line_not_exists':
+        return {
+          concreteSteps: [
+            '点击画板上方工具栏的「橡皮/删除线段」模式，或直接点击多余的红色/用户自绘线段将其移除。',
+            `对照三视图投影关系，检查 ${viewNameMap[String(p.view || 'front')] || '视图'} 坐标 (${p.x1},${p.y1})-(${p.x2},${p.y2}) 是否多画了不存在的轮廓线。`,
+          ],
+          pitfallTip: '只有实体棱线、孔槽边界或轴线才需要绘制，多余辅助线请用橡皮擦除。',
+          demoTopic: 'sketch_hidden_line',
+          demoLabel: '三视图虚实线规范演示',
+        };
+      default: {
+        const viewStr = viewNameMap[String(p.view || 'front')] || '目标视图';
+        const styleStr = styleNameMap[String(p.style || 'solid')] || '粗实线';
+        return {
+          concreteSteps: [
+            `先在上方工具栏选择线型为「${styleStr}」。`,
+            `在「${viewStr}」网格中，依次点击起点网格点 (${p.x1 ?? '?'},${p.y1 ?? '?'}) 和终点网格点 (${p.x2 ?? '?'},${p.y2 ?? '?'}) 连成直线。`,
+            '对照“长对正、高平齐、宽相等”投影虚线参考线，核对起止网格坐标是否对齐其他两个视图。',
+          ],
+          pitfallTip:
+            p.style === 'dashed'
+              ? '被遮挡看不见的内部孔洞或凹槽轮廓线，必须切换成「虚线」再绘制，不能画成粗实线！'
+              : '画错线段时点击工具栏「撤销」或切换「橡皮擦」点击该线段即可重新绘制。',
+          demoTopic: p.style === 'dashed' ? 'sketch_hidden_line' : 'sketch_3view',
+          demoLabel:
+            p.style === 'dashed' ? '三视图不可见虚线绘制演示' : '三视图长对正高平齐补线演示',
+        };
+      }
+    }
+  }
+
+  if (qType === 'circuit') {
+    switch (cp.ruleType) {
+      case 'circuit_wire_connected':
+        return {
+          concreteSteps: [
+            `在右侧电路实验台，找到器件引脚「${String(p.from || '')}」并鼠标点击选中（引脚会高亮）。`,
+            `接着点击目标器件引脚「${String(p.to || '')}」，系统即自动拉出一段导线连接两端。`,
+            '如连错导线，可直接点击导线或对应连线标签上的删除图标移除重连。',
+          ],
+          pitfallTip:
+            '连线时必须点中元件圆点引脚（例如 vcc.out、r1.a），不能把电源 VCC 和 GND 直接短接在一起。',
+          demoTopic: 'circuit_wiring',
+          demoLabel: '电子控制电路连线演示',
+        };
+      case 'circuit_component_value':
+        return {
+          concreteSteps: [
+            `在右侧电路板中单击选中对应元件（${String(p.componentId || '目标元件')}），或在下方「元件参数调节」面板找到它。`,
+            '按题目要求修改其参数值（如阈值或电阻参数）或点击切换开关「闭合/断开」状态。',
+          ],
+          pitfallTip: '修改传感器阈值或开关状态后，记得打开电源总开关观察负载反应。',
+          demoTopic: 'circuit_sensor_switch',
+          demoLabel: '传感器阈值与开关调试演示',
+        };
+      default:
+        return {
+          concreteSteps: [
+            '先确认上方「电源总开关」已点击开启（显示已通电）。',
+            '拖动左侧「环境仿真滑块」（光照强度 % / 环境温度 ℃）模拟题目测试条件。',
+            '观察 LED 指示灯、蜂鸣器或继电器状态是否按控制逻辑正确亮起/动作。',
+          ],
+          pitfallTip:
+            '若通电后负载不动作，常见原因是：① 回路未回到 GND 接地端；② NPN 三极管基极 B 未接控制信号或发射极 E 未接地；③ 手动开关未闭合。',
+          demoTopic: 'circuit_sensor_switch',
+          demoLabel: '电子控制回路通电调试演示',
+        };
+    }
+  }
+
+  if (qType === 'structure') {
+    switch (cp.ruleType) {
+      case 'structure_joint_style':
+        return {
+          concreteSteps: [
+            `在右侧结构实验台控制栏，将「节点连接方式」设置为「${p.jointType === 'rigid' ? '刚连接' : '铰连接'}」。`,
+            typeof p.minBaseWidth === 'number'
+              ? `拖动「底座支撑宽度」滑块，使支撑宽度不小于 ${p.minBaseWidth} mm。`
+              : '根据稳定性要求适当调宽支撑面宽度。',
+          ],
+          pitfallTip: '增大底座支撑面宽度可以显著提高结构抗倾倒能力（稳定性）。',
+          demoTopic: 'structure_triangle',
+          demoLabel: '结构稳定性与连接方式演示',
+        };
+      default:
+        return {
+          concreteSteps: [
+            '在右侧材料选择栏选好杆件材料（木材 / 铝合金 / 钢材）。',
+            '在结构网格上依次点击两个节点（如 A 与 C）添加斜撑杆件，构成稳定的三角形结构。',
+            '点击「施加测试载荷」查看安全系数（需 ≥ 1.0）与实时受力状态。',
+          ],
+          pitfallTip:
+            '四边形框架在受压时容易发生平行四边形变形失稳，必须连接对角线将其拆分为两个三角形！',
+          demoTopic: 'structure_triangle',
+          demoLabel: '结构加斜撑与抗压测试演示',
+        };
+    }
+  }
+
+  if (qType === 'control') {
+    switch (cp.ruleType) {
+      case 'control_mode_match':
+        return {
+          concreteSteps: [
+            `在右侧控制框图编辑器上方，点击切换控制类型为「${p.expectedMode === 'closed' ? '闭环控制' : '开环控制'}」。`,
+            '判断依据：如果输出量需要通过检测装置反过来影响输入对比（有反馈），选闭环；否则选开环。',
+          ],
+          pitfallTip: '定时控制、普通开关灯控制属于开环控制；恒温空调、自动水位控制属于闭环控制。',
+          demoTopic: 'control_closed_loop',
+          demoLabel: '开环与闭环控制框图演示',
+        };
+      case 'control_feedback_valid':
+        return {
+          concreteSteps: [
+            '将控制类型切换为「闭环控制」。',
+            '打开「连接检测反馈通道」开关，确保图上出现从输出端回到比较器的反馈箭头。',
+            '在最下方「检测装置（传感器）」方框中选入对应的测量传感器。',
+          ],
+          pitfallTip: '闭环控制系统必须同时具备“比较器 + 反馈连线 + 检测装置”三要素。',
+          demoTopic: 'control_closed_loop',
+          demoLabel: '闭环反馈通道搭建演示',
+        };
+      default:
+        return {
+          concreteSteps: [
+            `在右侧框图中找到目标方框（如「${String(p.slot || '控制器')}」），点击该方框下拉菜单或候选标签进行指派。`,
+            '理清“给定量 → 控制器 → 执行器 → 被控对象 → 被控量”的信号流向后再确认选择。',
+          ],
+          pitfallTip: '最常混淆的是「控制器」和「执行器」：大脑/芯片/电路板做决策是控制器；真正出力动作的电机/阀门/加热棒是执行器！',
+          demoTopic: 'control_closed_loop',
+          demoLabel: '控制系统各环节识别与填图演示',
+        };
+    }
+  }
+
+  if (qType === 'craft') {
+    switch (cp.ruleType) {
+      case 'craft_order_before':
+        return {
+          concreteSteps: [
+            '从右侧「待选工序池」点击所需工序将其加入「加工工艺流程图」，或点击工序卡片上的「↑ / ↓」按钮调整先后顺序。',
+            p.stepA && p.stepB
+              ? `务必确保「${String(p.stepA)}」排在「${String(p.stepB)}」之前。`
+              : '遵循金工/木工加工一般流程：划线 → 锯割/钻孔 → 锉削打磨 → 装配表面处理。',
+          ],
+          pitfallTip: '金工加工必须先“划线”定位再“锯割/钻孔”，最后才进行“锉削打磨”和表面涂饰。',
+          demoTopic: 'craft_metal_order',
+          demoLabel: '金工/木工工艺流程排序演示',
+        };
+      case 'craft_tool_match':
+        return {
+          concreteSteps: [
+            `在已排好的工艺卡片中找到「${String(p.step || '目标工序')}」。`,
+            `点击该卡片右侧的「选配工具」下拉框，选择正确工量具（${String(p.expectedTool || '对应工具')}）。`,
+          ],
+          pitfallTip: '样冲用于钻孔前冲眼定位；钢直尺/角尺用于划线检查；台虎钳用于夹持工件。',
+          demoTopic: 'craft_metal_order',
+          demoLabel: '加工工序与工量具选配演示',
+        };
+      case 'craft_safety_checked':
+        return {
+          concreteSteps: [
+            '在右侧下方「加工安全操作规范」勾选区，仔细辨别每一条安全守则。',
+            '勾选所有正确规范操作，取消勾选违规操作（如台钻钻孔时戴棉纱手套属于严重违规！）。',
+          ],
+          pitfallTip: '台钻钻孔时严禁戴手套，防止旋转的钻头卷入衣物或手套伤手！',
+          demoTopic: 'craft_metal_order',
+          demoLabel: '通用技术加工安全规范要点演示',
+        };
+      default:
+        return {
+          concreteSteps: [
+            '观察右侧「游标卡尺放大读数图」：先读主尺在游标零刻度线左侧的整毫米数。',
+            '再数游标尺上第几条刻度线与主尺刻度线完全对齐（20分度每格 0.05mm，50分度每格 0.02mm）。',
+            '将“主尺整数 + 游标小数”相加后填入「测量读数 (mm)」输入框（保留两位小数）。',
+          ],
+          pitfallTip: '读主尺时看的是“游标零刻度线左边最近的一条主尺整毫米刻度”，不要看成游标尺左端边缘！',
+          demoTopic: 'craft_caliper_read',
+          demoLabel: '游标卡尺精密读数方法演示',
+        };
+    }
+  }
+
   // File management
   if (cp.ruleType === 'file_exists') {
     if (p.itemType === 'shortcut') {
@@ -568,7 +774,17 @@ export function buildStepGuidance(
                   ? 'python_io'
                   : qType === 'database'
                     ? 'sql_select'
-                    : 'file_create',
+                    : qType === 'sketch3view'
+                      ? 'sketch_3view'
+                      : qType === 'circuit'
+                        ? 'circuit_wiring'
+                        : qType === 'structure'
+                          ? 'structure_triangle'
+                          : qType === 'control'
+                            ? 'control_closed_loop'
+                            : qType === 'craft'
+                              ? 'craft_metal_order'
+                              : 'file_create',
         demoLabel: '操作演示指南',
       };
     }

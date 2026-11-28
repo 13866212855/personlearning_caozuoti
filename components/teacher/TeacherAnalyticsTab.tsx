@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import SimulatorRenderer from '@/components/simulators/SimulatorRenderer';
 import { getPortalToken, portalFetch } from '@/lib/api';
+import { SUBJECT_PACKS } from '@/lib/subjects';
 import {
   TYPE_LABELS,
   type ClassItem,
@@ -1058,12 +1059,20 @@ export default function TeacherAnalyticsTab({
                 onChange={(e) => setRemType(e.target.value as QuestionType)}
                 className="w-full h-9 px-3 border border-slate-300 rounded-lg bg-white"
               >
-                <option value="word">Word 文字处理</option>
-                <option value="excel">Excel 电子表格</option>
-                <option value="web">网页制作</option>
-                <option value="file">文件与文件夹管理</option>
-                <option value="python">Python 程序设计</option>
-                <option value="database">数据库与 SQL 查询</option>
+                <optgroup label="高中信息技术">
+                  {SUBJECT_PACKS.it.questionTypes.map((t) => (
+                    <option key={t} value={t}>
+                      {TYPE_LABELS[t]}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="高中通用技术">
+                  {SUBJECT_PACKS.gt.questionTypes.map((t) => (
+                    <option key={t} value={t}>
+                      {TYPE_LABELS[t]}
+                    </option>
+                  ))}
+                </optgroup>
               </select>
             </label>
 

@@ -17,6 +17,7 @@ import {
   RotateCw,
 } from 'lucide-react';
 import StudentHeader from '@/components/StudentHeader';
+import { useAuthConfig } from '@/hooks/useAuthConfig';
 import {
   clearPortalToken,
   getCachedPortalUser,
@@ -24,7 +25,8 @@ import {
   portalFetch,
   setCachedPortalUser,
 } from '@/lib/api';
-import type { PortalUser, StudentExamCard } from '@/lib/types';
+import { SUBJECT_LABELS } from '@/lib/subjects';
+import type { PortalUser, StudentExamCard, SubjectId } from '@/lib/types';
 
 function formatTimeRange(startIso: string, endIso: string): string {
   const s = new Date(startIso).toLocaleString('zh-CN', {
@@ -50,10 +52,12 @@ function formatSec(sec: number): string {
 
 export default function StudentExamsHomePage() {
   const router = useRouter();
+  const auth = useAuthConfig();
   const [user, setUser] = useState<PortalUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [redirectingToLogin, setRedirectingToLogin] = useState(false);
   const [tab, setTab] = useState<'active' | 'completed'>('active');
+  const [subjectFilter, setSubjectFilter] = useState<'all' | SubjectId>('all');
 
   const [pending, setPending] = useState<StudentExamCard[]>([]);
   const [inProgress, setInProgress] = useState<StudentExamCard[]>([]);
@@ -206,7 +210,26 @@ export default function StudentExamsHomePage() {
     );
   }
 
-  const activeCards = [...inProgress, ...pending];
+  const enabledSubjects: SubjectId[] =
+    auth?.enabledSubjects && auth.enabledSubjects.length > 0
+      ? auth.enabledSubjects.map((s) => s.id)
+      : ['it', 'gt'];
+  const effectiveSubjectFilter: 'all' | SubjectId =
+    enabledSubjects.length === 1
+      ? enabledSubjects[0]
+      : subjectFilter !== 'all' && !enabledSubjects.includes(subjectFilter)
+        ? 'all'
+        : subjectFilter;
+
+  const matchesSubject = (exam: StudentExamCard) => {
+    const sid = (exam.subjectId || 'it') as SubjectId;
+    if (!enabledSubjects.includes(sid)) return false;
+    if (effectiveSubjectFilter === 'all') return true;
+    return sid === effectiveSubjectFilter;
+  };
+
+  const activeCards = [...inProgress, ...pending].filter(matchesSubject);
+  const completedCards = completed.filter(matchesSubject);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -236,7 +259,7 @@ export default function StudentExamsHomePage() {
             <div>
               <div className="text-slate-500">已完成考试</div>
               <div className="text-2xl font-bold text-teal-700 mt-0.5">
-                {loading ? '—' : completed.length}
+                {loading ? '—' : completedCards.length}
               </div>
             </div>
           </div>
@@ -255,39 +278,73 @@ export default function StudentExamsHomePage() {
           </div>
         )}
 
-        {/* Section Tabs */}
-        <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
-          <button
-            type="button"
-            onClick={() => setTab('active')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              tab === 'active'
-                ? 'bg-sky-600 text-white'
-                : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
-            }`}
-          >
-            待完成与进行中（{loading ? '…' : activeCards.length}）
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab('completed')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              tab === 'completed'
-                ? 'bg-sky-600 text-white'
-                : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
-            }`}
-          >
-            已完成考试（{loading ? '…' : completed.length}）
-          </button>
+        {/* Section Tabs & Subject Filter */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setTab('active')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap shrink-0 ${
+                tab === 'active'
+                  ? 'bg-sky-600 text-white'
+                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              待完成与进行中（{loading ? '…' : activeCards.length}）
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab('completed')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap shrink-0 ${
+                tab === 'completed'
+                  ? 'bg-sky-600 text-white'
+                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              已完成考试（{loading ? '…' : completedCards.length}）
+            </button>
+          </div>
+
+          {enabledSubjects.length >= 2 && (
+            <div className="flex items-center gap-1 p-1 bg-slate-100 border border-slate-200 rounded-lg text-xs">
+              <button
+                type="button"
+                onClick={() => setSubjectFilter('all')}
+                className={`px-3 py-1.5 rounded-md font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  effectiveSubjectFilter === 'all'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                全部学科
+              </button>
+              {enabledSubjects.map((sid) => (
+                <button
+                  key={sid}
+                  type="button"
+                  onClick={() => setSubjectFilter(sid)}
+                  className={`px-3 py-1.5 rounded-md font-medium transition-colors whitespace-nowrap shrink-0 ${
+                    effectiveSubjectFilter === sid
+                      ? sid === 'gt'
+                        ? 'bg-white text-teal-700 shadow-xs'
+                        : 'bg-white text-sky-700 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {SUBJECT_LABELS[sid]}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Loading Skeleton while exam list fetches */}
-        {loading && activeCards.length === 0 && completed.length === 0 ? (
+        {loading && activeCards.length === 0 && completedCards.length === 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {[1, 2, 3].map((i) => (
               <div
                 key={i}
-                className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4 animate-pulse"
+                className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4"
               >
                 <div className="h-3 w-24 bg-slate-200 rounded" />
                 <div className="h-5 w-3/4 bg-slate-200 rounded" />
@@ -336,6 +393,7 @@ export default function StudentExamsHomePage() {
                                   : exam.statusReason || '暂不可进入'}
                             </span>
                             <span className="text-slate-500">
+                              {SUBJECT_LABELS[(exam.subjectId || 'it') as SubjectId]} ·{' '}
                               {exam.teacherName}
                             </span>
                           </div>
@@ -415,13 +473,13 @@ export default function StudentExamsHomePage() {
             {/* Completed Exams */}
             {tab === 'completed' && (
               <section className="space-y-4">
-                {completed.length === 0 ? (
+                {completedCards.length === 0 ? (
                   <div className="bg-white border border-slate-200 rounded-2xl py-16 text-center text-sm text-slate-500">
                     暂无已完成的考试记录
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {completed.map((exam) => (
+                    {completedCards.map((exam) => (
                       <article
                         key={exam.id}
                         className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col justify-between gap-4"
@@ -433,6 +491,7 @@ export default function StudentExamsHomePage() {
                               已完成（{exam.attemptsUsed}/{exam.maxAttempts} 次）
                             </span>
                             <span className="text-slate-500">
+                              {SUBJECT_LABELS[(exam.subjectId || 'it') as SubjectId]} ·{' '}
                               {exam.teacherName}
                             </span>
                           </div>

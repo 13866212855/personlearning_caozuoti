@@ -1,13 +1,33 @@
 export type UserRole = 'super_admin' | 'teacher' | 'student';
+export type SubjectId = 'it' | 'gt';
+
 export type QuestionType =
   | 'word'
   | 'excel'
   | 'web'
   | 'file'
   | 'python'
-  | 'database';
+  | 'database'
+  | 'sketch3view'
+  | 'circuit'
+  | 'structure'
+  | 'control'
+  | 'craft';
+
 export type DifficultyLevel = '基础' | '中等' | '提高';
 export type QuestionVisibility = 'private' | 'shared' | 'public';
+
+export interface SubjectConfigItem {
+  id: SubjectId;
+  name: string;
+  shortName: string;
+  description: string;
+  examContext: string;
+  questionTypes: QuestionType[];
+  isEnabled: boolean;
+  isDefault: boolean;
+  sortOrder: number;
+}
 
 export interface WordParagraph {
   id: string;
@@ -133,13 +153,139 @@ export interface DatabaseState {
   lastError?: string;
 }
 
+// ==================== 高中通用技术 (gt) 仿真状态模型 ====================
+
+export type SketchViewName = 'front' | 'top' | 'left';
+export type SketchLineStyle = 'solid' | 'dashed' | 'center';
+
+export interface SketchLine {
+  view: SketchViewName;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  style: SketchLineStyle;
+}
+
+export interface SketchDimension {
+  id: string;
+  view: SketchViewName;
+  label: string;
+  value: string;
+}
+
+export interface Sketch3ViewState {
+  partTitle?: string;
+  gridCols: number;
+  gridRows: number;
+  givenLines: SketchLine[];
+  lines: SketchLine[];
+  dimensions?: SketchDimension[];
+}
+
+export type CircuitComponentType =
+  | 'vcc'
+  | 'gnd'
+  | 'switch'
+  | 'resistor'
+  | 'sensor_light'
+  | 'sensor_temp'
+  | 'transistor_npn'
+  | 'relay'
+  | 'led'
+  | 'buzzer';
+
+export interface CircuitComponent {
+  id: string;
+  type: CircuitComponentType;
+  label: string;
+  x: number;
+  y: number;
+  pins: string[];
+  value?: string;
+  closed?: boolean;
+}
+
+export interface CircuitWire {
+  from: string;
+  to: string;
+}
+
+export interface CircuitState {
+  title?: string;
+  components: CircuitComponent[];
+  wires: CircuitWire[];
+  powered: boolean;
+  lightLevel?: number;
+  tempC?: number;
+}
+
+export interface StructureNode {
+  id: string;
+  x: number;
+  y: number;
+  label?: string;
+  fixed?: boolean;
+}
+
+export interface StructureMember {
+  from: string;
+  to: string;
+  material: 'wood' | 'steel' | 'aluminum';
+}
+
+export interface StructureState {
+  taskTitle?: string;
+  nodes: StructureNode[];
+  baseMembers: StructureMember[];
+  members: StructureMember[];
+  jointType: 'rigid' | 'hinged';
+  supportBaseWidth: number;
+  testLoadN: number;
+}
+
+export interface ControlSystemState {
+  systemTitle?: string;
+  mode: 'open' | 'closed';
+  availableOptions: string[];
+  slots: {
+    input: string;
+    comparator?: string;
+    controller: string;
+    actuator: string;
+    plant: string;
+    sensor?: string;
+    output: string;
+  };
+  hasFeedbackEdge: boolean;
+  disturbance?: string;
+}
+
+export interface CraftProcessState {
+  taskTitle?: string;
+  availableSteps: string[];
+  orderedSteps: string[];
+  availableTools: string[];
+  selectedTools: Record<string, string>;
+  safetyOptions: string[];
+  safetyChecks: string[];
+  caliperMainMm?: number;
+  caliperVernierDiv?: number;
+  caliperReading?: string;
+}
+
 export type SimulatorState =
   | WordState
   | ExcelState
   | WebState
   | FileState
   | PythonState
-  | DatabaseState;
+  | DatabaseState
+  | Sketch3ViewState
+  | CircuitState
+  | StructureState
+  | ControlSystemState
+  | CraftProcessState;
 
 export interface QuestionStep {
   index: number;
@@ -156,6 +302,7 @@ export interface QuestionAsset {
 
 export interface ClientQuestion {
   id: string;
+  subjectId?: SubjectId;
   title: string;
   type: QuestionType;
   difficulty: DifficultyLevel;
@@ -253,12 +400,14 @@ export interface PortalUser {
   teacherId?: string;
   teacherName?: string;
   classId?: string;
+  subjectId?: SubjectId | '';
   mustChangePassword: boolean;
   unreadNotifications?: number;
 }
 
 export interface StudentExamCard {
   id: string;
+  subjectId?: SubjectId;
   title: string;
   description: string;
   teacherName: string;
@@ -308,6 +457,7 @@ export interface ClassItem {
 
 export interface KnowledgePointItem {
   id: string;
+  subjectId?: SubjectId;
   type: QuestionType;
   chapter: string;
   name: string;
@@ -316,6 +466,7 @@ export interface KnowledgePointItem {
 
 export interface TeacherExamSummary {
   id: string;
+  subjectId?: SubjectId;
   title: string;
   description: string;
   duration: number;
@@ -339,4 +490,9 @@ export const TYPE_LABELS: Record<QuestionType, string> = {
   file: '文件与文件夹管理',
   python: 'Python 程序设计',
   database: '数据库与 SQL 查询',
+  sketch3view: '三视图与技术草图',
+  circuit: '电子控制电路调试',
+  structure: '结构设计与受力测试',
+  control: '控制系统框图设计',
+  craft: '金工/木工工艺流程',
 };

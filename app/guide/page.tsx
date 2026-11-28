@@ -5,8 +5,10 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { ArrowLeft, BookOpen, Loader2 } from 'lucide-react';
 import StepGuideShowcase from '@/components/guide/StepGuideShowcase';
+import { useAuthConfig } from '@/hooks/useAuthConfig';
 
 function GuidePageContent() {
+  const authConfig = useAuthConfig();
   const searchParams = useSearchParams();
   const topic = searchParams.get('topic') || undefined;
   const stepStr = searchParams.get('step');
@@ -26,7 +28,7 @@ function GuidePageContent() {
               操作题小白图文演示中心
             </h1>
             <p className="text-[11px] text-slate-500">
-              手把手分解每一步工具栏位置与常见坑点
+              {authConfig?.siteTitle ? `${authConfig.siteTitle} · ` : ''}手把手分解每一步工具栏位置与常见坑点
             </p>
           </div>
         </div>

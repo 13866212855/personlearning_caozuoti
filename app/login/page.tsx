@@ -143,7 +143,7 @@ export default function PortalLoginPage() {
             <BookOpen className="w-5 h-5" />
           </div>
           <h1 className="text-xl font-bold text-slate-900">
-            高中信息技术会考·操作题系统
+            {auth?.siteTitle || '高中会考实操练习与测评系统'}
           </h1>
           <p className="text-sm text-slate-500">
             {platformMode

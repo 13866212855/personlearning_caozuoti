@@ -7,19 +7,25 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Cpu,
   Database,
+  DraftingCompass,
   FileCode2,
   FileSpreadsheet,
   FileText,
   FolderOpen,
+  GitBranch,
   Lightbulb,
   MousePointerClick,
   Pause,
   Play,
   RotateCcw,
   Terminal,
+  Triangle,
+  Wrench,
 } from 'lucide-react';
-import type { QuestionType } from '@/lib/types';
+import type { QuestionType, SubjectId } from '@/lib/types';
+import { getSubjectForType } from '@/lib/subjects';
 
 interface DemoFrame {
   title: string;
@@ -72,6 +78,27 @@ interface DemoFrame {
     sqlResultCols?: string[];
     sqlResultRows?: Array<Array<string | number>>;
     sqlActionNote?: string;
+    // GT - Sketch3View
+    sketchShowHidden?: boolean;
+    sketchCenterLine?: boolean;
+    sketchDimText?: string;
+    // GT - Circuit
+    circuitWired?: boolean;
+    circuitPowered?: boolean;
+    circuitLedOn?: boolean;
+    circuitEnvText?: string;
+    // GT - Structure
+    structHasBrace?: boolean;
+    structJoint?: 'rigid' | 'hinged';
+    structStable?: boolean;
+    // GT - Control
+    controlClosed?: boolean;
+    controlFeedback?: boolean;
+    controlSlotsReady?: boolean;
+    // GT - Craft
+    craftSteps?: string[];
+    craftToolsReady?: boolean;
+    craftCaliperText?: string;
   };
 }
 
@@ -909,6 +936,195 @@ export const GUIDE_TOPICS: GuideTopicConfig[] = [
       },
     ],
   },
+  // ================= GT: SKETCH 3-VIEW =================
+  {
+    id: 'sketch_3view',
+    category: 'sketch3view',
+    label: '三视图补全与投影规律（长对正、高平齐、宽相等）',
+    summary: '先切换视图与线型（粗实线），再依次单击网格起点和终点完成三视图投影轮廓线。',
+    pitfall: '主视图与俯视图必须“长对正”（横向格子数对齐），主视图与左视图“高平齐”，俯视图与左视图“宽相等”！',
+    frames: [
+      {
+        title: '第 1 步：确认线型为「粗实线」并定位对齐点',
+        actionText: '在顶部工具栏选中「粗实线（可见轮廓）」，核对主视图台阶高度对应的左视图网格坐标。',
+        highlightControl: 'gt_sketch_style',
+        tip: '画图前先在脑中把主视图水平投影线向右拉到左视图，竖直投影线向下拉到俯视图。',
+        stageState: { sketchShowHidden: false, sketchCenterLine: false },
+      },
+      {
+        title: '第 2 步：逐段单击起点与终点绘制轮廓线',
+        actionText: '用鼠标在对应视图的网格交点上先点击起点，再点击终点，依次补齐外轮廓和内部台阶边线。',
+        highlightControl: 'gt_sketch_canvas',
+        tip: '画错线条可切换「橡皮擦」点击该线段删除，或按 Ctrl+Z 撤销上一步。',
+        stageState: { sketchShowHidden: false, sketchCenterLine: true },
+      },
+      {
+        title: '第 3 步：核对尺寸标注与三等规律',
+        actionText: '检查主/俯/左三视图轮廓封闭且尺寸标注数字与单位正确。',
+        highlightControl: 'gt_sketch_dim',
+        tip: '图样中标注的尺寸默认以毫米（mm）为单位，填写纯数值即可，无需重复写单位。',
+        stageState: { sketchShowHidden: false, sketchCenterLine: true, sketchDimText: '总长 L = 60' },
+      },
+    ],
+  },
+  {
+    id: 'sketch_hidden_line',
+    category: 'sketch3view',
+    label: '不可见轮廓虚线与对称中心线绘制',
+    summary: '被前方实体遮挡的通孔或凹槽边缘必须切换为「虚线」，回转体/对称件轴线使用「细点画线」。',
+    pitfall: '隐藏通孔或内部槽口错画成粗实线是三视图高频扣分点；画线前务必查看顶部当前激活的线型！',
+    frames: [
+      {
+        title: '第 1 步：切换线型为「虚线（不可见轮廓）」',
+        actionText: '单击工具栏中的「虚线」按钮，准备绘制被遮挡的内部贯通槽边界。',
+        highlightControl: 'gt_sketch_style',
+        tip: '凡是从当前投影方向看过去被挡住的轮廓线，一律画虚线。',
+        stageState: { sketchShowHidden: false },
+      },
+      {
+        title: '第 2 步：在对应投影位置绘制虚线与点画线',
+        actionText: '在左视图/主视图对应高度位置连接两侧边界画虚线，并用「细点画线」标出圆孔中心轴线。',
+        highlightControl: 'gt_sketch_canvas',
+        tip: '中心线应略微超出轮廓边界，保证对称位置清晰可读。',
+        stageState: { sketchShowHidden: true, sketchCenterLine: true },
+      },
+    ],
+  },
+  // ================= GT: CIRCUIT =================
+  {
+    id: 'circuit_wiring',
+    category: 'circuit',
+    label: '电子控制电路连线与闭合回路调试',
+    summary: '依次单击源引脚与目标引脚完成导线连接，确保构成从 VCC 到 GND 的完整闭合回路，最后通电验证。',
+    pitfall: '漏接 GND 接地线、LED 正负极接反或忘记打开电源总开关，都会导致执行器件不动作！',
+    frames: [
+      {
+        title: '第 1 步：逐对单击引脚连接导线',
+        actionText: '先单击电源正极 VCC 引脚，再单击限流电阻左端引脚，按电路逻辑依次连至传感器、三极管与 LED。',
+        highlightControl: 'gt_circuit_board',
+        tip: '需要拆除错连的导线时，在右侧导线列表中点击对应连线的删除按钮即可。',
+        stageState: { circuitWired: false, circuitPowered: false, circuitLedOn: false },
+      },
+      {
+        title: '第 2 步：闭合电源开关并通电测试',
+        actionText: '确认所有回路节点连通且三极管/继电器控制端接通后，点击顶部「电源总开关」通电。',
+        highlightControl: 'gt_circuit_power',
+        tip: '观察工作状态栏中的电路导通提示与 LED/蜂鸣器指示灯亮起状态。',
+        stageState: { circuitWired: true, circuitPowered: true, circuitLedOn: true },
+      },
+    ],
+  },
+  {
+    id: 'circuit_sensor_switch',
+    category: 'circuit',
+    label: '传感器环境参数调节与开关触发验证',
+    summary: '拖动光照度或温度滑块模拟环境变化，观察光敏/热敏电阻触发三极管导通及继电器吸合情况。',
+    pitfall: '光控路灯应确保在「低照度（天黑）」时导通，温控风扇应在「高于阈值温度」时触发动作。',
+    frames: [
+      {
+        title: '第 1 步：调节光照度/温度测试滑块',
+        actionText: '拖动左侧环境参数调节面板中的「环境光照度」或「环境温度」滑块至题目要求区间。',
+        highlightControl: 'gt_circuit_env',
+        tip: '调整滑块后，电路仿真器会实时重新计算各支路电平与三极管导通状态。',
+        stageState: { circuitWired: true, circuitPowered: true, circuitLedOn: false, circuitEnvText: '光照：15 lx（夜间）' },
+      },
+      {
+        title: '第 2 步：确认执行器件（LED/蜂鸣器）动作',
+        actionText: '检查负载工作指示是否进入“已导通报警/点亮”状态，确认控制阈值逻辑符合题意。',
+        highlightControl: 'gt_circuit_board',
+        tip: '若未导通，请重点检查分压电阻串联顺序与开关闭合状态。',
+        stageState: { circuitWired: true, circuitPowered: true, circuitLedOn: true, circuitEnvText: '光照：15 lx → 已触发点亮' },
+      },
+    ],
+  },
+  // ================= GT: STRUCTURE =================
+  {
+    id: 'structure_triangle',
+    category: 'structure',
+    label: '三角形稳定性加固、连接方式与支承面设置',
+    summary: '选定材料与结构节点加装斜向拉杆构成三角形，并合理选用刚连接与足够宽度的支承面。',
+    pitfall: '四边形框架缺乏对角斜撑极易发生倾倒变形！单靠增大底座而不加斜拉杆仍无法消除结构不稳定。',
+    frames: [
+      {
+        title: '第 1 步：选择杆件材料并依次单击两个节点加装斜撑',
+        actionText: '选好「钢材」或「铝合金」材料后，依次单击四边形对角两个节点，添加斜向拉杆形成稳定三角形。',
+        highlightControl: 'gt_struct_canvas',
+        tip: '三角形具有几何不变性，能显著提高桁架抗压与抗弯能力。',
+        stageState: { structHasBrace: false, structJoint: 'hinged', structStable: false },
+      },
+      {
+        title: '第 2 步：切换为「刚连接」并增大支承面宽度',
+        actionText: '在参数控制栏将连接方式设为「刚连接」，并将支承面宽度调整至稳固范围后观察受力仿真结果。',
+        highlightControl: 'gt_struct_controls',
+        tip: '支承面越大、重心越低、连接越可靠，结构整体稳定性越高。',
+        stageState: { structHasBrace: true, structJoint: 'rigid', structStable: true },
+      },
+    ],
+  },
+  // ================= GT: CONTROL =================
+  {
+    id: 'control_closed_loop',
+    category: 'control',
+    label: '开环/闭环控制系统框图设计与反馈通道连接',
+    summary: '先选择控制类型（开环或闭环），连上反馈通道后逐槽位指派给定量、比较器、控制器、执行器与检测装置。',
+    pitfall: '闭环控制系统必须同时具备「比较器」「检测装置（传感器）」以及闭合的「反馈通道」，三者缺一不可！',
+    frames: [
+      {
+        title: '第 1 步：切换为「闭环控制」并连上反馈通道',
+        actionText: '点击顶部的「闭环控制系统」按钮，并开启「连接反馈通道」，展开比较器与检测装置槽位。',
+        highlightControl: 'gt_control_mode',
+        tip: '只有带反馈回路的系统才能根据输出偏差自动进行纠偏调节。',
+        stageState: { controlClosed: true, controlFeedback: true, controlSlotsReady: false },
+      },
+      {
+        title: '第 2 步：在每个框图槽位中选择对应环节组件',
+        actionText: '依次在「给定量」「比较器」「控制器」「执行器」「被控对象」「检测装置」「被控量」下拉框选对硬件/信号。',
+        highlightControl: 'gt_control_slots',
+        tip: '注意区分「执行器」（如水泵/加热器/电机）与「被控对象」（如水箱/室温/小车）。',
+        stageState: { controlClosed: true, controlFeedback: true, controlSlotsReady: true },
+      },
+    ],
+  },
+  // ================= GT: CRAFT =================
+  {
+    id: 'craft_metal_order',
+    category: 'craft',
+    label: '金工/木工工艺流程排序与工量具选配',
+    summary: '按“划线→锯割→锉削→钻孔→攻丝/表面处理”标准工序依次添加到流程区，并为每道工序匹配专用工具。',
+    pitfall: '金属钻孔前必须先“冲眼”定位防止钻头滑移；攻内螺纹前必须先钻底孔，顺序不可颠倒！',
+    frames: [
+      {
+        title: '第 1 步：按标准加工顺序点击添加工序步骤',
+        actionText: '从左侧工序库依次将「划线」「锯割」「锉削」「钻孔」等步骤添加到右侧已排工序列表，必要时用上/下按钮微调。',
+        highlightControl: 'gt_craft_steps',
+        tip: '遵循“先下料成型、再精修、后打孔连接、最后表面防护”的工艺规律。',
+        stageState: { craftSteps: ['1. 划线定位', '2. 锯割下料', '3. 锉削修整', '4. 冲眼钻孔'], craftToolsReady: false },
+      },
+      {
+        title: '第 2 步：匹配工量具并勾选安全操作规范',
+        actionText: '为每一步骤下拉选择对应工具（如样冲、台钻、钢锯、锉刀），并勾选安全规范（如戴护目镜、严禁戴手套操作台钻）。',
+        highlightControl: 'gt_craft_tools',
+        tip: '在台钻上钻孔时严禁戴手套，以免旋转钻头卷入造成伤害！',
+        stageState: { craftSteps: ['1. 划线定位', '2. 锯割下料', '3. 锉削修整', '4. 冲眼钻孔'], craftToolsReady: true },
+      },
+    ],
+  },
+  {
+    id: 'craft_caliper_read',
+    category: 'craft',
+    label: '游标卡尺精密读数技巧（主尺整数 + 游标对齐格数）',
+    summary: '先读出游标零刻线左侧主尺的整毫米数，再找与主尺刻线完全对齐的游标格数乘以分度值（0.02mm）。',
+    pitfall: '注意区分 50 分度游标卡尺精度为 0.02mm，不要误把主尺的半厘米刻度当成 1mm 读错！',
+    frames: [
+      {
+        title: '第 1 步：读取主尺整毫米数并对齐游标刻线',
+        actionText: '观察游标零刻度线左侧最接近的主尺毫米读数，再找到游标上与主尺对齐的那一条刻线序号。',
+        highlightControl: 'gt_craft_caliper',
+        tip: '主尺读数 + 游标对齐格数 × 0.02 = 最终读数（保留两位小数，如 24.36）。',
+        stageState: { craftCaliperText: '主尺 24 mm + 对齐 18 格 × 0.02 = 24.36 mm' },
+      },
+    ],
+  },
 ];
 
 interface Props {
@@ -920,13 +1136,23 @@ interface Props {
   onSelectTopic?: (topicId: string) => void;
 }
 
-const CATEGORY_META: Array<{ id: QuestionType; label: string; icon: typeof FileText }> = [
-  { id: 'word', label: 'Word 文字处理', icon: FileText },
-  { id: 'excel', label: 'Excel 电子表格', icon: FileSpreadsheet },
-  { id: 'web', label: '网页制作 (HTML/CSS)', icon: FileCode2 },
-  { id: 'file', label: '文件与文件夹管理', icon: FolderOpen },
-  { id: 'python', label: 'Python 程序设计', icon: Terminal },
-  { id: 'database', label: '数据库与 SQL 查询', icon: Database },
+const CATEGORY_META: Array<{
+  id: QuestionType;
+  subject: SubjectId;
+  label: string;
+  icon: typeof FileText;
+}> = [
+  { id: 'word', subject: 'it', label: 'Word 文字处理', icon: FileText },
+  { id: 'excel', subject: 'it', label: 'Excel 电子表格', icon: FileSpreadsheet },
+  { id: 'web', subject: 'it', label: '网页制作 (HTML/CSS)', icon: FileCode2 },
+  { id: 'file', subject: 'it', label: '文件与文件夹管理', icon: FolderOpen },
+  { id: 'python', subject: 'it', label: 'Python 程序设计', icon: Terminal },
+  { id: 'database', subject: 'it', label: '数据库与 SQL 查询', icon: Database },
+  { id: 'sketch3view', subject: 'gt', label: '三视图与技术草图', icon: DraftingCompass },
+  { id: 'circuit', subject: 'gt', label: '电子控制电路调试', icon: Cpu },
+  { id: 'structure', subject: 'gt', label: '结构设计与受力测试', icon: Triangle },
+  { id: 'control', subject: 'gt', label: '控制系统框图设计', icon: GitBranch },
+  { id: 'craft', subject: 'gt', label: '金工/木工工艺流程', icon: Wrench },
 ];
 
 export default function StepGuideShowcase({
@@ -943,18 +1169,33 @@ export default function StepGuideShowcase({
   );
 
   const [selectedId, setSelectedId] = useState(initialTopic.id);
+  const [subjectTab, setSubjectTab] = useState<'all' | SubjectId>(() =>
+    topicId ? getSubjectForType(initialTopic.category) : 'all'
+  );
   const [frameIndex, setFrameIndex] = useState(0);
   const [playing, setPlaying] = useState(true);
 
   useEffect(() => {
-    if (topicId && GUIDE_TOPICS.some((t) => t.id === topicId)) {
-      Promise.resolve().then(() => {
-        setSelectedId(topicId);
-        setFrameIndex(0);
-        setPlaying(true);
-      });
+    if (topicId) {
+      const matched = GUIDE_TOPICS.find((t) => t.id === topicId);
+      if (matched) {
+        Promise.resolve().then(() => {
+          setSelectedId(topicId);
+          setSubjectTab(getSubjectForType(matched.category));
+          setFrameIndex(0);
+          setPlaying(true);
+        });
+      }
     }
   }, [topicId]);
+
+  const visibleCategories = useMemo(
+    () =>
+      subjectTab === 'all'
+        ? CATEGORY_META
+        : CATEGORY_META.filter((c) => c.subject === subjectTab),
+    [subjectTab]
+  );
 
   const currentTopic = useMemo(
     () => GUIDE_TOPICS.find((t) => t.id === selectedId) || GUIDE_TOPICS[0],
@@ -1003,12 +1244,36 @@ export default function StepGuideShowcase({
 
       {/* Optional Topic Directory Switcher */}
       {allowTopicSwitch && (
-        <div className="bg-white border border-slate-200 rounded-xl p-3.5 space-y-2.5">
-          <div className="text-xs font-semibold text-slate-700">
-            选择操作题型与动画演示主题：
+        <div className="bg-white border border-slate-200 rounded-xl p-3.5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-xs font-semibold text-slate-700">
+              选择操作题型与动画演示主题：
+            </div>
+            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs">
+              {(
+                [
+                  { id: 'all', label: '全部学科' },
+                  { id: 'it', label: '高中信息技术' },
+                  { id: 'gt', label: '高中通用技术' },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setSubjectTab(tab.id)}
+                  className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
+                    subjectTab === tab.id
+                      ? 'bg-white text-sky-700 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            {CATEGORY_META.map((cat) => {
+            {visibleCategories.map((cat) => {
               const Icon = cat.icon;
               const items = GUIDE_TOPICS.filter((t) => t.category === cat.id);
               const isCatActive = currentTopic.category === cat.id;
@@ -1021,9 +1286,14 @@ export default function StepGuideShowcase({
                       : 'border-slate-200 bg-slate-50/50'
                   }`}
                 >
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
-                    <Icon className="w-3.5 h-3.5 text-sky-600 shrink-0" />
-                    <span>{cat.label}</span>
+                  <div className="flex items-center justify-between gap-1.5 text-xs font-semibold text-slate-800">
+                    <span className="flex items-center gap-1.5">
+                      <Icon className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                      <span>{cat.label}</span>
+                    </span>
+                    <span className="text-[10px] font-normal text-slate-500">
+                      {cat.subject === 'gt' ? '通用技术' : '信息技术'}
+                    </span>
                   </div>
                   <div className="flex flex-col gap-1">
                     {items.map((item) => (
@@ -1891,6 +2161,335 @@ function MockSimulatorStage({
               )}
             </div>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ================= GT: SKETCH 3-VIEW =================
+  if (category === 'sketch3view') {
+    return (
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden text-xs">
+        <div
+          className={`bg-slate-50 border-b border-slate-200 p-2 flex flex-wrap items-center gap-1.5 ${
+            hc === 'gt_sketch_style' ? 'ring-2 ring-inset ring-sky-400 bg-sky-50/40' : ''
+          }`}
+        >
+          <span className="px-2 py-0.5 rounded border border-sky-400 bg-sky-50 text-sky-900 font-medium text-[11px]">
+            {st.sketchShowHidden ? '虚线（不可见轮廓）' : '粗实线（可见轮廓）'}
+          </span>
+          <span className="px-2 py-0.5 rounded border border-slate-200 bg-white text-slate-600 text-[11px]">
+            细点画线
+          </span>
+          <span className="px-2 py-0.5 rounded border border-slate-200 bg-white text-slate-600 text-[11px]">
+            橡皮擦
+          </span>
+          {hc === 'gt_sketch_style' && <PointerHint label="选好对应线型" />}
+        </div>
+
+        <div
+          className={`p-3 grid grid-cols-2 gap-3 bg-slate-50/40 ${
+            hc === 'gt_sketch_canvas' ? 'ring-2 ring-inset ring-sky-400' : ''
+          }`}
+        >
+          <div className="bg-white border border-slate-200 rounded-lg p-2">
+            <div className="text-[10px] font-semibold text-slate-500 mb-1">
+              主视图（长 × 高）
+            </div>
+            <svg viewBox="0 0 120 75" className="w-full h-24 bg-slate-50 rounded border border-slate-100">
+              <rect x="20" y="15" width="80" height="45" fill="none" stroke="#0f172a" strokeWidth="2" />
+              <line x1="20" y1="35" x2="100" y2="35" stroke="#0284c7" strokeWidth="2" />
+              {st.sketchShowHidden && (
+                <line x1="45" y1="35" x2="45" y2="60" stroke="#dc2626" strokeWidth="1.5" strokeDasharray="4 3" />
+              )}
+              {st.sketchCenterLine && (
+                <line x1="60" y1="10" x2="60" y2="65" stroke="#0f766e" strokeWidth="1.2" strokeDasharray="6 2 2 2" />
+              )}
+            </svg>
+          </div>
+          <div className="bg-white border border-slate-200 rounded-lg p-2">
+            <div className="text-[10px] font-semibold text-slate-500 mb-1">
+              左视图（宽 × 高 · 高平齐）
+            </div>
+            <svg viewBox="0 0 120 75" className="w-full h-24 bg-slate-50 rounded border border-slate-100">
+              <rect x="30" y="15" width="60" height="45" fill="none" stroke="#0f172a" strokeWidth="2" />
+              <line x1="30" y1="35" x2="90" y2="35" stroke="#0284c7" strokeWidth="2" />
+              {st.sketchShowHidden && (
+                <line x1="30" y1="48" x2="90" y2="48" stroke="#dc2626" strokeWidth="1.5" strokeDasharray="4 3" />
+              )}
+            </svg>
+          </div>
+          <div className="bg-white border border-slate-200 rounded-lg p-2">
+            <div className="text-[10px] font-semibold text-slate-500 mb-1">
+              俯视图（长 × 宽 · 长对正）
+            </div>
+            <svg viewBox="0 0 120 65" className="w-full h-20 bg-slate-50 rounded border border-slate-100">
+              <rect x="20" y="12" width="80" height="40" fill="none" stroke="#0f172a" strokeWidth="2" />
+              <rect x="40" y="22" width="40" height="20" fill="none" stroke="#0284c7" strokeWidth="1.8" />
+            </svg>
+          </div>
+          <div
+            className={`bg-white border border-slate-200 rounded-lg p-2.5 flex flex-col justify-center ${
+              hc === 'gt_sketch_dim' ? 'ring-2 ring-sky-400 bg-sky-50/40' : ''
+            }`}
+          >
+            <div className="text-[10px] font-semibold text-slate-500">尺寸标注核对</div>
+            <div className="text-xs font-mono font-bold text-slate-800 mt-1 tabular-nums">
+              {st.sketchDimText || '保持长对正、高平齐、宽相等'}
+            </div>
+            {hc === 'gt_sketch_dim' && <div className="mt-1.5"><PointerHint label="核对尺寸数值" /></div>}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ================= GT: CIRCUIT =================
+  if (category === 'circuit') {
+    return (
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden text-xs">
+        <div
+          className={`bg-slate-50 border-b border-slate-200 p-2 flex flex-wrap items-center justify-between gap-2 ${
+            hc === 'gt_circuit_power' ? 'ring-2 ring-inset ring-sky-400 bg-sky-50/40' : ''
+          }`}
+        >
+          <span className="font-semibold text-slate-700">电子控制试验台</span>
+          <div className="flex items-center gap-2">
+            <span
+              className={`px-2.5 py-1 rounded text-[11px] font-semibold ${
+                st.circuitPowered
+                  ? 'bg-teal-600 text-white'
+                  : 'bg-white border border-slate-300 text-slate-700'
+              }`}
+            >
+              {st.circuitPowered ? '总电源：已闭合通电' : '总电源：已断开'}
+            </span>
+            {hc === 'gt_circuit_power' && <PointerHint label="点击闭合开关" />}
+          </div>
+        </div>
+
+        <div className="grid sm:grid-cols-12 divide-y sm:divide-y-0 sm:divide-x divide-slate-200">
+          <div
+            className={`sm:col-span-4 p-2.5 bg-slate-50/60 space-y-2 ${
+              hc === 'gt_circuit_env' ? 'ring-2 ring-inset ring-sky-400 bg-sky-50/40' : ''
+            }`}
+          >
+            <div className="text-[10px] font-semibold text-slate-500">环境参数模拟</div>
+            <div className="p-2 rounded border border-slate-200 bg-white text-[11px] font-mono text-slate-700 tabular-nums">
+              {st.circuitEnvText || '光照度：20 lx / 温度：25 °C'}
+            </div>
+            <div
+              className={`p-2 rounded border text-[11px] font-medium ${
+                st.circuitLedOn
+                  ? 'border-teal-300 bg-teal-50 text-teal-800'
+                  : 'border-slate-200 bg-white text-slate-500'
+              }`}
+            >
+              执行器件：{st.circuitLedOn ? '已导通点亮' : '未导通'}
+            </div>
+          </div>
+
+          <div
+            className={`sm:col-span-8 p-3 bg-white ${
+              hc === 'gt_circuit_board' ? 'ring-2 ring-inset ring-sky-400' : ''
+            }`}
+          >
+            <svg viewBox="0 0 280 120" className="w-full h-36 bg-slate-50 rounded-lg border border-slate-200">
+              <rect x="16" y="42" width="44" height="32" rx="6" fill="#e0f2fe" stroke="#0284c7" strokeWidth="1.5" />
+              <text x="38" y="62" textAnchor="middle" fontSize="11" fill="#0369a1" fontWeight="bold">VCC</text>
+
+              <rect x="92" y="42" width="52" height="32" rx="6" fill="#fef3c7" stroke="#d97706" strokeWidth="1.5" />
+              <text x="118" y="62" textAnchor="middle" fontSize="10" fill="#92400e">传感器/R</text>
+
+              <circle cx="192" cy="58" r="17" fill={st.circuitLedOn ? '#fde047' : '#f1f5f9'} stroke={st.circuitLedOn ? '#ca8a04' : '#64748b'} strokeWidth="2" />
+              <text x="192" y="62" textAnchor="middle" fontSize="10" fill="#0f172a" fontWeight="bold">LED</text>
+
+              <rect x="228" y="42" width="38" height="32" rx="6" fill="#e2e8f0" stroke="#475569" strokeWidth="1.5" />
+              <text x="247" y="62" textAnchor="middle" fontSize="10" fill="#334155">GND</text>
+
+              <line
+                x1="60"
+                y1="58"
+                x2="92"
+                y2="58"
+                stroke={st.circuitWired ? '#0284c7' : '#cbd5e1'}
+                strokeWidth="2.5"
+                strokeDasharray={st.circuitWired ? undefined : '4 3'}
+              />
+              <line
+                x1="144"
+                y1="58"
+                x2="175"
+                y2="58"
+                stroke={st.circuitWired ? '#0284c7' : '#cbd5e1'}
+                strokeWidth="2.5"
+                strokeDasharray={st.circuitWired ? undefined : '4 3'}
+              />
+              <line
+                x1="209"
+                y1="58"
+                x2="228"
+                y2="58"
+                stroke={st.circuitWired ? '#0284c7' : '#cbd5e1'}
+                strokeWidth="2.5"
+                strokeDasharray={st.circuitWired ? undefined : '4 3'}
+              />
+            </svg>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ================= GT: STRUCTURE =================
+  if (category === 'structure') {
+    return (
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden text-xs">
+        <div
+          className={`bg-slate-50 border-b border-slate-200 p-2 flex flex-wrap items-center justify-between gap-2 ${
+            hc === 'gt_struct_controls' ? 'ring-2 ring-inset ring-sky-400 bg-sky-50/40' : ''
+          }`}
+        >
+          <span className="text-[11px] font-medium text-slate-700">
+            连接方式：{st.structJoint === 'rigid' ? '刚连接' : '铰连接'} · 支承面宽度：{st.structStable ? '加宽稳固' : '偏窄'}
+          </span>
+          <span
+            className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+              st.structStable ? 'bg-teal-50 text-teal-800 border border-teal-200' : 'bg-amber-50 text-amber-800 border border-amber-200'
+            }`}
+          >
+            {st.structStable ? '结构稳固（形成三角形）' : '存在变形倾倒风险'}
+          </span>
+        </div>
+
+        <div
+          className={`p-3 bg-white ${
+            hc === 'gt_struct_canvas' ? 'ring-2 ring-inset ring-sky-400' : ''
+          }`}
+        >
+          <svg viewBox="0 0 260 120" className="w-full h-36 bg-slate-50 rounded-lg border border-slate-200">
+            <line x1="40" y1="100" x2="220" y2="100" stroke="#94a3b8" strokeWidth="3" />
+            <rect x="75" y="25" width="110" height="75" fill="none" stroke="#334155" strokeWidth="3" />
+            {st.structHasBrace && (
+              <line x1="75" y1="100" x2="185" y2="25" stroke="#0284c7" strokeWidth="3" />
+            )}
+            <circle cx="75" cy="25" r="4" fill="#0f172a" />
+            <circle cx="185" cy="25" r="4" fill="#0f172a" />
+            <circle cx="75" cy="100" r="4" fill="#0f172a" />
+            <circle cx="185" cy="100" r="4" fill="#0f172a" />
+          </svg>
+        </div>
+      </div>
+    );
+  }
+
+  // ================= GT: CONTROL =================
+  if (category === 'control') {
+    return (
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden text-xs">
+        <div
+          className={`bg-slate-50 border-b border-slate-200 p-2 flex flex-wrap items-center justify-between gap-2 ${
+            hc === 'gt_control_mode' ? 'ring-2 ring-inset ring-sky-400 bg-sky-50/40' : ''
+          }`}
+        >
+          <div className="flex items-center gap-1.5">
+            <span className="px-2 py-0.5 rounded border border-sky-400 bg-sky-50 text-sky-900 font-semibold text-[11px]">
+              {st.controlClosed ? '闭环控制系统' : '开环控制系统'}
+            </span>
+            <span className="px-2 py-0.5 rounded border border-slate-200 bg-white text-slate-700 text-[11px]">
+              {st.controlFeedback ? '反馈通道：已连接' : '反馈通道：未连接'}
+            </span>
+          </div>
+          {hc === 'gt_control_mode' && <PointerHint label="切换闭环与反馈" />}
+        </div>
+
+        <div
+          className={`p-3 space-y-2.5 bg-white ${
+            hc === 'gt_control_slots' ? 'ring-2 ring-inset ring-sky-400 bg-sky-50/20' : ''
+          }`}
+        >
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+            {(st.controlClosed
+              ? ['给定量', '比较器', '控制器', '执行器', '被控对象', '被控量']
+              : ['给定量', '控制器', '执行器', '被控对象', '被控量']
+            ).map((slot, idx) => (
+              <div key={slot} className="flex items-center gap-1.5">
+                <span
+                  className={`px-2 py-1 rounded border ${
+                    st.controlSlotsReady
+                      ? 'border-teal-300 bg-teal-50 text-teal-900 font-medium'
+                      : 'border-slate-200 bg-slate-50 text-slate-600'
+                  }`}
+                >
+                  {slot}
+                </span>
+                {idx < (st.controlClosed ? 5 : 4) && (
+                  <span className="text-slate-400">→</span>
+                )}
+              </div>
+            ))}
+          </div>
+          {st.controlFeedback && (
+            <div className="border-t border-dashed border-sky-300 pt-2 text-[11px] text-sky-800 flex items-center justify-between">
+              <span>← 检测装置（传感器）采集输出并送回比较器</span>
+              <span className="font-mono text-[10px]">FEEDBACK</span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ================= GT: CRAFT =================
+  if (category === 'craft') {
+    const steps = st.craftSteps || ['1. 划线定位', '2. 锯割下料', '3. 锉削修整'];
+    return (
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden text-xs">
+        <div className="bg-slate-50 border-b border-slate-200 px-3 py-2 font-semibold text-slate-700">
+          金工 / 木工加工与量具测绘工作台
+        </div>
+        <div className="p-3 space-y-2.5 bg-white">
+          {st.craftCaliperText ? (
+            <div
+              className={`p-3 rounded-lg border border-sky-200 bg-sky-50/40 space-y-2 ${
+                hc === 'gt_craft_caliper' ? 'ring-2 ring-sky-400' : ''
+              }`}
+            >
+              <div className="text-[11px] font-semibold text-slate-700">
+                50 分度游标卡尺读数示范（精确度 0.02 mm）
+              </div>
+              <div className="font-mono text-sm font-bold text-sky-800 tabular-nums">
+                {st.craftCaliperText}
+              </div>
+            </div>
+          ) : (
+            <div className="grid sm:grid-cols-2 gap-2.5">
+              <div
+                className={`p-2.5 rounded-lg border border-slate-200 bg-slate-50/60 space-y-1 ${
+                  hc === 'gt_craft_steps' ? 'ring-2 ring-sky-400 bg-sky-50/40' : ''
+                }`}
+              >
+                <div className="text-[10px] font-semibold text-slate-500">已排加工工序</div>
+                {steps.map((s) => (
+                  <div key={s} className="px-2 py-1 rounded bg-white border border-slate-200 text-[11px] text-slate-800">
+                    {s}
+                  </div>
+                ))}
+              </div>
+              <div
+                className={`p-2.5 rounded-lg border border-slate-200 bg-slate-50/60 space-y-1 ${
+                  hc === 'gt_craft_tools' ? 'ring-2 ring-sky-400 bg-sky-50/40' : ''
+                }`}
+              >
+                <div className="text-[10px] font-semibold text-slate-500">工量具选配与安全规范</div>
+                <div className="text-[11px] text-slate-700">
+                  {st.craftToolsReady
+                    ? '已匹配：钢直尺/划针、手锯、锉刀、台钻（不戴手套）'
+                    : '待为每道工序指派专用加工工具并勾选安全规范'}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );

@@ -1,6 +1,9 @@
 import type {
   Checkpoint,
   CheckpointResult,
+  CircuitState,
+  ControlSystemState,
+  CraftProcessState,
   DatabaseState,
   ExcelState,
   FileState,
@@ -8,6 +11,9 @@ import type {
   PythonState,
   QuestionType,
   SimulatorState,
+  Sketch3ViewState,
+  SketchLine,
+  StructureState,
   WebState,
   WordState,
 } from '../types';
@@ -16,6 +22,11 @@ import {
   expandRange,
   normalizeFormula,
 } from '../utils/excelFormula';
+import {
+  areWirePinsConnected,
+  evaluateCircuit,
+  evaluateStructure,
+} from '../../lib/gtEvaluators';
 import { checkPythonSyntax, runPythonTestCases } from '../utils/pythonRunner';
 import { runSqlInMemory } from '../utils/sqlRunner';
 
@@ -1030,6 +1041,489 @@ function gradeDatabaseCheckpoint(
   };
 }
 
+function sameSketchSegment(a: SketchLine, b: SketchLine): boolean {
+  if (a.view !== b.view) return false;
+  const forward = a.x1 === b.x1 && a.y1 === b.y1 && a.x2 === b.x2 && a.y2 === b.y2;
+  const reverse = a.x1 === b.x2 && a.y1 === b.y2 && a.x2 === b.x1 && a.y2 === b.y1;
+  return forward || reverse;
+}
+
+const VIEW_CN: Record<string, string> = {
+  front: '主视图',
+  top: '俯视图',
+  left: '左视图',
+};
+
+const LINE_STYLE_CN: Record<string, string> = {
+  solid: '粗实线',
+  dashed: '虚线',
+  center: '点画线',
+};
+
+function gradeSketch3ViewCheckpoint(
+  cp: Checkpoint,
+  state: Sketch3ViewState
+): CheckpointResult {
+  const p = cp.params || {};
+  const allLines: SketchLine[] = [
+    ...(Array.isArray(state?.givenLines) ? state.givenLines : []),
+    ...(Array.isArray(state?.lines) ? state.lines : []),
+  ];
+  let passed = false;
+  let feedback = '';
+
+  switch (cp.ruleType) {
+    case 'sketch_line_exists': {
+      const target: SketchLine = {
+        view: (p.view as SketchLine['view']) || 'front',
+        x1: Number(p.x1),
+        y1: Number(p.y1),
+        x2: Number(p.x2),
+        y2: Number(p.y2),
+        style: (p.style as SketchLine['style']) || 'solid',
+      };
+      const matched = allLines.find(
+        (l) =>
+          sameSketchSegment(l, target) &&
+          (!p.style || l.style === target.style)
+      );
+      const wrongStyle = !matched
+        ? allLines.find((l) => sameSketchSegment(l, target))
+        : undefined;
+      passed = Boolean(matched);
+      if (passed) {
+        feedback = `${VIEW_CN[target.view] || target.view} 线段 (${target.x1},${target.y1})-(${target.x2},${target.y2}) [${LINE_STYLE_CN[target.style] || target.style}] 绘制正确。`;
+      } else if (wrongStyle) {
+        feedback = `${VIEW_CN[target.view] || target.view} 线段位置正确，但线型应为「${LINE_STYLE_CN[target.style] || target.style}」（当前为「${LINE_STYLE_CN[wrongStyle.style] || wrongStyle.style}」）。`;
+      } else {
+        feedback = `${VIEW_CN[target.view] || target.view} 缺少目标线段 (${target.x1},${target.y1})-(${target.x2},${target.y2})。`;
+      }
+      break;
+    }
+
+    case 'sketch_line_not_exists': {
+      const target: SketchLine = {
+        view: (p.view as SketchLine['view']) || 'front',
+        x1: Number(p.x1),
+        y1: Number(p.y1),
+        x2: Number(p.x2),
+        y2: Number(p.y2),
+        style: (p.style as SketchLine['style']) || 'solid',
+      };
+      const userLines = Array.isArray(state?.lines) ? state.lines : [];
+      const found = userLines.some((l) => sameSketchSegment(l, target));
+      passed = !found;
+      feedback = passed
+        ? '图面无多余错误线段。'
+        : `${VIEW_CN[target.view] || target.view} 存在不应出现的线段 (${target.x1},${target.y1})-(${target.x2},${target.y2})，请擦除。`;
+      break;
+    }
+
+    case 'sketch_dimension_match': {
+      const dims = Array.isArray(state?.dimensions) ? state.dimensions : [];
+      const view = String(p.view || 'front');
+      const expected = String(p.expectedValue || '').trim();
+      const label = p.label ? String(p.label).trim() : '';
+      const found = dims.find(
+        (d) =>
+          d.view === view &&
+          (!label || d.label.includes(label)) &&
+          d.value.trim().replace(/mm$/i, '') === expected.replace(/mm$/i, '')
+      );
+      passed = Boolean(found);
+      feedback = passed
+        ? `${VIEW_CN[view] || view} 尺寸标注「${expected}」正确。`
+        : `${VIEW_CN[view] || view} 尺寸标注未设为「${expected}」。`;
+      break;
+    }
+
+    default:
+      feedback = `未知的三视图判分规则: ${cp.ruleType}`;
+  }
+
+  return {
+    checkpointId: cp.id,
+    stepIndex: cp.stepIndex,
+    description: cp.description,
+    maxScore: cp.score,
+    earnedScore: passed ? cp.score : 0,
+    passed,
+    feedback,
+  };
+}
+
+function gradeCircuitCheckpoint(
+  cp: Checkpoint,
+  state: CircuitState
+): CheckpointResult {
+  const p = cp.params || {};
+  let passed = false;
+  let feedback = '';
+
+  switch (cp.ruleType) {
+    case 'circuit_wire_connected': {
+      const fromPin = String(p.from || '');
+      const toPin = String(p.to || '');
+      passed = areWirePinsConnected(state, fromPin, toPin);
+      feedback = passed
+        ? `导线连接 ${fromPin} ↔ ${toPin} 正确。`
+        : `未检测到 ${fromPin} 与 ${toPin} 之间的有效导线连接。`;
+      break;
+    }
+
+    case 'circuit_component_value': {
+      const compId = String(p.componentId || '');
+      const comp = (state.components || []).find((c) => c.id === compId);
+      if (!comp) {
+        feedback = `未找到元件 ${compId}。`;
+        break;
+      }
+      const errs: string[] = [];
+      if (p.expectedValue !== undefined) {
+        const act = String(comp.value || '').trim().toLowerCase();
+        const exp = String(p.expectedValue).trim().toLowerCase();
+        if (act !== exp && !act.includes(exp)) {
+          errs.push(`${comp.label} 参数应包含/等于「${p.expectedValue}」，当前为「${comp.value || '未设置'}」`);
+        }
+      }
+      if (typeof p.closed === 'boolean' && Boolean(comp.closed) !== p.closed) {
+        errs.push(`${comp.label} 开关应处于「${p.closed ? '闭合' : '断开'}」状态`);
+      }
+      passed = errs.length === 0;
+      feedback = passed ? `${comp.label} 参数设置正确。` : errs.join('；');
+      break;
+    }
+
+    case 'circuit_sim_output': {
+      const simState: CircuitState = {
+        ...state,
+        powered: p.testPowered !== undefined ? Boolean(p.testPowered) : true,
+        lightLevel:
+          typeof p.testLightLevel === 'number'
+            ? p.testLightLevel
+            : state.lightLevel ?? 50,
+        tempC:
+          typeof p.testTempC === 'number' ? p.testTempC : state.tempC ?? 25,
+      };
+      const evalRes = evaluateCircuit(simState);
+      if (evalRes.shortCircuit) {
+        passed = false;
+        feedback = '检测到 VCC 与 GND 短路，请检查连线回路。';
+        break;
+      }
+      const reqActive = Array.isArray(p.activeOutputIds)
+        ? p.activeOutputIds.map((x) => String(x))
+        : p.outputId
+          ? [String(p.outputId)]
+          : [];
+      const shouldBeActive =
+        p.expectActive !== undefined ? Boolean(p.expectActive) : true;
+
+      if (reqActive.length === 0) {
+        passed = shouldBeActive
+          ? evalRes.activeComponentIds.length > 0
+          : evalRes.activeComponentIds.length === 0;
+      } else {
+        passed = reqActive.every(
+          (id) => Boolean(evalRes.activeOutputs[id]) === shouldBeActive
+        );
+      }
+      feedback = passed
+        ? `在测试工况下电路输出状态正确（${shouldBeActive ? '已触发动作' : '处于待机断开状态'}）。`
+        : `在测试工况（光照 ${simState.lightLevel}% / 温度 ${simState.tempC}℃）下输出器件未按预期${shouldBeActive ? '导通工作' : '保持关闭'}。`;
+      break;
+    }
+
+    default:
+      feedback = `未知的电路仿真判分规则: ${cp.ruleType}`;
+  }
+
+  return {
+    checkpointId: cp.id,
+    stepIndex: cp.stepIndex,
+    description: cp.description,
+    maxScore: cp.score,
+    earnedScore: passed ? cp.score : 0,
+    passed,
+    feedback,
+  };
+}
+
+function gradeStructureCheckpoint(
+  cp: Checkpoint,
+  state: StructureState
+): CheckpointResult {
+  const p = cp.params || {};
+  let passed = false;
+  let feedback = '';
+
+  const allMembers = [
+    ...(Array.isArray(state?.baseMembers) ? state.baseMembers : []),
+    ...(Array.isArray(state?.members) ? state.members : []),
+  ];
+
+  switch (cp.ruleType) {
+    case 'structure_member_exists': {
+      const from = String(p.from || '').trim();
+      const to = String(p.to || '').trim();
+      const matched = allMembers.find(
+        (m) =>
+          (m.from === from && m.to === to) || (m.from === to && m.to === from)
+      );
+      if (!matched) {
+        feedback = `未连接节点 ${from} 与 ${to} 之间的支撑杆件。`;
+        break;
+      }
+      if (p.material && matched.material !== p.material) {
+        feedback = `杆件 ${from}-${to} 材料应为「${p.material}」，当前为「${matched.material}」。`;
+        break;
+      }
+      passed = true;
+      feedback = `支撑杆件 ${from}-${to} 设置正确。`;
+      break;
+    }
+
+    case 'structure_joint_style': {
+      const errs: string[] = [];
+      if (p.jointType && state.jointType !== p.jointType) {
+        errs.push(
+          `连接方式应设为「${p.jointType === 'rigid' ? '刚连接' : '铰连接'}」`
+        );
+      }
+      if (
+        typeof p.minBaseWidth === 'number' &&
+        Number(state.supportBaseWidth || 0) < p.minBaseWidth
+      ) {
+        errs.push(
+          `底座支撑宽度应不小于 ${p.minBaseWidth}（当前为 ${state.supportBaseWidth}）`
+        );
+      }
+      passed = errs.length === 0;
+      feedback = passed ? '结构连接方式与支撑面尺寸符合要求。' : errs.join('；');
+      break;
+    }
+
+    case 'structure_load_safe': {
+      const res = evaluateStructure(state);
+      const minTri = typeof p.minTriangles === 'number' ? p.minTriangles : 1;
+      const minSF = typeof p.minSafetyFactor === 'number' ? p.minSafetyFactor : 1.0;
+      const errs: string[] = [];
+      if (res.triangleCount < minTri) {
+        errs.push(`需至少构成 ${minTri} 个稳定三角形（当前 ${res.triangleCount} 个）`);
+      }
+      if (res.safetyFactor < minSF) {
+        errs.push(`安全系数需达到 ${minSF}（当前 ${res.safetyFactor}）`);
+      }
+      if (!res.isStable) {
+        errs.push('当前结构仍存在失稳或超载风险');
+      }
+      passed = errs.length === 0;
+      feedback = passed
+        ? `结构强度与稳定性测试通过（安全系数 ${res.safetyFactor}，形成 ${res.triangleCount} 个三角形）。`
+        : errs.join('；');
+      break;
+    }
+
+    default:
+      feedback = `未知的结构力学判分规则: ${cp.ruleType}`;
+  }
+
+  return {
+    checkpointId: cp.id,
+    stepIndex: cp.stepIndex,
+    description: cp.description,
+    maxScore: cp.score,
+    earnedScore: passed ? cp.score : 0,
+    passed,
+    feedback,
+  };
+}
+
+const CONTROL_SLOT_CN: Record<string, string> = {
+  input: '给定量（输入）',
+  comparator: '比较器',
+  controller: '控制器',
+  actuator: '执行器',
+  plant: '被控对象',
+  sensor: '检测装置（反馈）',
+  output: '被控量（输出）',
+};
+
+function gradeControlCheckpoint(
+  cp: Checkpoint,
+  state: ControlSystemState
+): CheckpointResult {
+  const p = cp.params || {};
+  let passed = false;
+  let feedback = '';
+
+  switch (cp.ruleType) {
+    case 'control_mode_match': {
+      const exp = String(p.expectedMode || 'closed');
+      passed = state.mode === exp;
+      feedback = passed
+        ? `控制类型已正确设为「${exp === 'closed' ? '闭环控制' : '开环控制'}」。`
+        : `控制类型应选择「${exp === 'closed' ? '闭环控制' : '开环控制'}」。`;
+      break;
+    }
+
+    case 'control_slot_match': {
+      const slotKey = String(p.slot || 'controller') as keyof ControlSystemState['slots'];
+      const actual = String(state.slots?.[slotKey] || '').trim();
+      const slotName = CONTROL_SLOT_CN[slotKey] || slotKey;
+      if (!actual) {
+        feedback = `方框「${slotName}」尚未选择或填入具体器件/信号。`;
+        break;
+      }
+      if (p.expectedValue !== undefined) {
+        const exp = String(p.expectedValue).trim();
+        passed = actual === exp || actual.includes(exp);
+      } else if (Array.isArray(p.keywords)) {
+        passed = p.keywords.every((k) => actual.includes(String(k)));
+      } else {
+        passed = true;
+      }
+      feedback = passed
+        ? `方框「${slotName}」配置正确（${actual}）。`
+        : `方框「${slotName}」当前为「${actual}」，期望为「${p.expectedValue || (Array.isArray(p.keywords) ? p.keywords.join('、') : '')}」。`;
+      break;
+    }
+
+    case 'control_feedback_valid': {
+      const requireFeedback =
+        p.expectFeedback !== undefined ? Boolean(p.expectFeedback) : true;
+      if (requireFeedback) {
+        const hasEdge = Boolean(state.hasFeedbackEdge);
+        const hasSensor = Boolean((state.slots?.sensor || '').trim());
+        const isClosed = state.mode === 'closed';
+        passed = hasEdge && hasSensor && isClosed;
+        feedback = passed
+          ? '闭环反馈通道及检测装置配置完整。'
+          : '闭环控制系统需切换为闭环模式、连接反馈通道并配置检测装置（传感器）。';
+      } else {
+        passed = !state.hasFeedbackEdge && state.mode === 'open';
+        feedback = passed
+          ? '开环控制无反馈路径设置正确。'
+          : '开环控制系统不应包含检测反馈回路。';
+      }
+      break;
+    }
+
+    default:
+      feedback = `未知的控制系统判分规则: ${cp.ruleType}`;
+  }
+
+  return {
+    checkpointId: cp.id,
+    stepIndex: cp.stepIndex,
+    description: cp.description,
+    maxScore: cp.score,
+    earnedScore: passed ? cp.score : 0,
+    passed,
+    feedback,
+  };
+}
+
+function gradeCraftCheckpoint(
+  cp: Checkpoint,
+  state: CraftProcessState
+): CheckpointResult {
+  const p = cp.params || {};
+  let passed = false;
+  let feedback = '';
+
+  switch (cp.ruleType) {
+    case 'craft_order_before': {
+      const order = Array.isArray(state?.orderedSteps) ? state.orderedSteps : [];
+      if (Array.isArray(p.exactOrder)) {
+        const exp = p.exactOrder.map((x) => String(x));
+        passed =
+          order.length >= exp.length &&
+          exp.every((step, idx) => order[idx] === step);
+        feedback = passed
+          ? '加工工艺流程排序完全正确。'
+          : `工艺流程排序尚未按规范排列（需依次为：${exp.join(' → ')}）。`;
+        break;
+      }
+      const stepA = String(p.stepA || '');
+      const stepB = String(p.stepB || '');
+      const idxA = order.indexOf(stepA);
+      const idxB = order.indexOf(stepB);
+      if (idxA === -1 || idxB === -1) {
+        feedback = `工序列表中尚未加入「${idxA === -1 ? stepA : stepB}」。`;
+        break;
+      }
+      passed = idxA < idxB;
+      feedback = passed
+        ? `工艺顺序正确：「${stepA}」先于「${stepB}」。`
+        : `工艺顺序有误：「${stepA}」应当排在「${stepB}」之前执行。`;
+      break;
+    }
+
+    case 'craft_tool_match': {
+      const stepName = String(p.step || '');
+      const selected = String(state.selectedTools?.[stepName] || '').trim();
+      const allowed = Array.isArray(p.allowedTools)
+        ? p.allowedTools.map((x) => String(x))
+        : p.expectedTool
+          ? [String(p.expectedTool)]
+          : [];
+      passed = Boolean(selected && allowed.some((t) => selected === t || selected.includes(t)));
+      feedback = passed
+        ? `工序「${stepName}」工量具选配正确（${selected}）。`
+        : `工序「${stepName}」应选用「${allowed.join(' 或 ')}」，当前为「${selected || '未选择'}」。`;
+      break;
+    }
+
+    case 'craft_safety_checked': {
+      const checked = new Set(state.safetyChecks || []);
+      const req = Array.isArray(p.requiredChecks)
+        ? p.requiredChecks.map((x) => String(x))
+        : [];
+      const forbidden = Array.isArray(p.forbiddenChecks)
+        ? p.forbiddenChecks.map((x) => String(x))
+        : [];
+      const missing = req.filter((r) => !checked.has(r));
+      const wrong = forbidden.filter((f) => checked.has(f));
+      passed = missing.length === 0 && wrong.length === 0;
+      if (passed) {
+        feedback = '加工安全操作规范勾选全部正确。';
+      } else {
+        const msgs: string[] = [];
+        if (missing.length > 0) msgs.push(`漏选必做安全规范：${missing.join('、')}`);
+        if (wrong.length > 0) msgs.push(`误选违规操作项：${wrong.join('、')}`);
+        feedback = msgs.join('；');
+      }
+      break;
+    }
+
+    case 'craft_reading_approx': {
+      const raw = String(state.caliperReading || '').trim().replace(/mm$/i, '');
+      const actual = Number(raw);
+      const expected = Number(p.expectedReading);
+      const tol = typeof p.tolerance === 'number' ? p.tolerance : 0.04;
+      passed = raw !== '' && Number.isFinite(actual) && Math.abs(actual - expected) <= tol;
+      feedback = passed
+        ? `游标卡尺读数 ${actual.toFixed(2)} mm 正确。`
+        : `游标卡尺读数有误（当前填入「${state.caliperReading || '空'}」，正确读数为 ${expected.toFixed(2)} mm）。`;
+      break;
+    }
+
+    default:
+      feedback = `未知的工艺与测量判分规则: ${cp.ruleType}`;
+  }
+
+  return {
+    checkpointId: cp.id,
+    stepIndex: cp.stepIndex,
+    description: cp.description,
+    maxScore: cp.score,
+    earnedScore: passed ? cp.score : 0,
+    passed,
+    feedback,
+  };
+}
+
 export function gradeAnswerDeterministic(
   type: QuestionType,
   checkpoints: Checkpoint[],
@@ -1052,6 +1546,16 @@ export function gradeAnswerDeterministic(
       res = gradePythonCheckpoint(cp, answer as PythonState);
     } else if (type === 'database') {
       res = gradeDatabaseCheckpoint(cp, answer as DatabaseState);
+    } else if (type === 'sketch3view') {
+      res = gradeSketch3ViewCheckpoint(cp, answer as Sketch3ViewState);
+    } else if (type === 'circuit') {
+      res = gradeCircuitCheckpoint(cp, answer as CircuitState);
+    } else if (type === 'structure') {
+      res = gradeStructureCheckpoint(cp, answer as StructureState);
+    } else if (type === 'control') {
+      res = gradeControlCheckpoint(cp, answer as ControlSystemState);
+    } else if (type === 'craft') {
+      res = gradeCraftCheckpoint(cp, answer as CraftProcessState);
     } else {
       res = gradeFileCheckpoint(cp, answer as FileState);
     }

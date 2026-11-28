@@ -48,7 +48,7 @@ export default function StudentHeader({ user }: StudentHeaderProps) {
             <span className="w-8 h-8 rounded-lg bg-sky-600 text-white flex items-center justify-center">
               <BookOpen className="w-4 h-4" />
             </span>
-            <span>高中信息技术会考·操作题系统</span>
+            <span>{auth?.siteTitle || '高中会考实操练习与测评系统'}</span>
           </Link>
 
           <nav className="hidden md:flex items-center gap-6 text-sm font-medium">

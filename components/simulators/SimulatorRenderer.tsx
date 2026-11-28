@@ -3,6 +3,9 @@
 import { useEffect, useRef } from 'react';
 import { Redo2, Undo2, X } from 'lucide-react';
 import type {
+  CircuitState,
+  ControlSystemState,
+  CraftProcessState,
   DatabaseState,
   ExcelState,
   FileState,
@@ -10,6 +13,8 @@ import type {
   QuestionAsset,
   QuestionType,
   SimulatorState,
+  Sketch3ViewState,
+  StructureState,
   WebState,
   WordState,
 } from '@/lib/types';
@@ -20,6 +25,11 @@ import WebSimulator from './WebSimulator';
 import FileManagerSimulator from './FileManagerSimulator';
 import PythonSimulator from './PythonSimulator';
 import DatabaseSimulator from './DatabaseSimulator';
+import ThreeViewSketchSimulator from './ThreeViewSketchSimulator';
+import CircuitSimulator from './CircuitSimulator';
+import StructureSimulator from './StructureSimulator';
+import ControlSystemSimulator from './ControlSystemSimulator';
+import CraftProcessSimulator from './CraftProcessSimulator';
 
 interface SimulatorRendererProps {
   type: QuestionType;
@@ -155,6 +165,56 @@ export default function SimulatorRenderer({
         <DatabaseSimulator
           key={innerKey}
           value={value as DatabaseState}
+          onChange={simOnChange}
+          readOnly={readOnly}
+        />
+      );
+    }
+    if (type === 'sketch3view') {
+      return (
+        <ThreeViewSketchSimulator
+          key={innerKey}
+          value={value as Sketch3ViewState}
+          onChange={simOnChange}
+          readOnly={readOnly}
+        />
+      );
+    }
+    if (type === 'circuit') {
+      return (
+        <CircuitSimulator
+          key={innerKey}
+          value={value as CircuitState}
+          onChange={simOnChange}
+          readOnly={readOnly}
+        />
+      );
+    }
+    if (type === 'structure') {
+      return (
+        <StructureSimulator
+          key={innerKey}
+          value={value as StructureState}
+          onChange={simOnChange}
+          readOnly={readOnly}
+        />
+      );
+    }
+    if (type === 'control') {
+      return (
+        <ControlSystemSimulator
+          key={innerKey}
+          value={value as ControlSystemState}
+          onChange={simOnChange}
+          readOnly={readOnly}
+        />
+      );
+    }
+    if (type === 'craft') {
+      return (
+        <CraftProcessSimulator
+          key={innerKey}
+          value={value as CraftProcessState}
           onChange={simOnChange}
           readOnly={readOnly}
         />

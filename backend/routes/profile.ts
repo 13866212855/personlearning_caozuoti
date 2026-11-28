@@ -469,6 +469,11 @@ router.get('/stats', (req: AuthedRequest, res) => {
     file: { sum: 0, count: 0 },
     python: { sum: 0, count: 0 },
     database: { sum: 0, count: 0 },
+    sketch3view: { sum: 0, count: 0 },
+    circuit: { sum: 0, count: 0 },
+    structure: { sum: 0, count: 0 },
+    control: { sum: 0, count: 0 },
+    craft: { sum: 0, count: 0 },
   };
   const kpStats: Record<string, { sumPct: number; count: number }> = {};
 

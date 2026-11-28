@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { adminFetch } from '@/lib/api';
-import { TYPE_LABELS, type QuestionType } from '@/lib/types';
+import { SUBJECT_LABELS, getSubjectForType } from '@/lib/subjects';
+import { TYPE_LABELS, type QuestionType, type SubjectId } from '@/lib/types';
 
 interface OverviewData {
   studentCount: number;
@@ -16,6 +17,7 @@ interface OverviewData {
   avgScore: number;
   submissionsByType: Array<{
     type: QuestionType;
+    subjectId?: SubjectId;
     count: number;
     avgScore: number;
   }>;
@@ -24,6 +26,7 @@ interface OverviewData {
 export default function AdminOverviewTab() {
   const [data, setData] = useState<OverviewData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [subjectFilter, setSubjectFilter] = useState<'all' | SubjectId>('all');
 
   useEffect(() => {
     adminFetch<OverviewData>('/api/admin/overview')
@@ -46,17 +49,20 @@ export default function AdminOverviewTab() {
     );
   }
 
-  const maxCount = Math.max(
-    1,
-    ...data.submissionsByType.map((s) => s.count)
-  );
+  const visibleTypes = data.submissionsByType.filter((item) => {
+    if (subjectFilter === 'all') return true;
+    const sub = item.subjectId || getSubjectForType(item.type);
+    return sub === subjectFilter;
+  });
+
+  const maxCount = Math.max(1, ...visibleTypes.map((s) => s.count));
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-bold text-slate-900">系统数据概览</h2>
         <p className="text-xs text-slate-500 mt-0.5">
-          实时统计学生规模、题库建设及操作题作答情况
+          实时统计学生规模、多学科题库建设及操作题作答情况
         </p>
       </div>
 
@@ -94,30 +100,62 @@ export default function AdminOverviewTab() {
       </div>
 
       <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-4">
-        <h3 className="text-sm font-semibold text-slate-900">
-          各题型提交量与平均得分率
-        </h3>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-slate-900">
+            各题型提交量与平均得分率
+          </h3>
+          <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs">
+            {(
+              [
+                { id: 'all', label: '全部题型' },
+                { id: 'it', label: '高中信息技术' },
+                { id: 'gt', label: '高中通用技术' },
+              ] as const
+            ).map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setSubjectFilter(t.id)}
+                className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
+                  subjectFilter === t.id
+                    ? 'bg-white text-sky-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="space-y-4">
-          {data.submissionsByType.map((item) => (
-            <div key={item.type} className="space-y-1.5">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-medium text-slate-800">
-                  {TYPE_LABELS[item.type]}
-                </span>
-                <span className="text-slate-600 tabular-nums">
-                  {item.count} 次提交 · 平均 {item.avgScore}%
-                </span>
+          {visibleTypes.map((item) => {
+            const sub = item.subjectId || getSubjectForType(item.type);
+            return (
+              <div key={item.type} className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-medium text-slate-800">
+                    {TYPE_LABELS[item.type] || item.type}
+                    <span className="text-[11px] font-normal text-slate-400 ml-1.5">
+                      · {SUBJECT_LABELS[sub]}
+                    </span>
+                  </span>
+                  <span className="text-slate-600 tabular-nums">
+                    {item.count} 次提交 · 平均 {item.avgScore}%
+                  </span>
+                </div>
+                <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      sub === 'gt' ? 'bg-teal-600' : 'bg-sky-600'
+                    }`}
+                    style={{
+                      width: `${Math.max(item.count > 0 ? 4 : 0, (item.count / maxCount) * 100)}%`,
+                    }}
+                  />
+                </div>
               </div>
-              <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-sky-600 rounded-full transition-all"
-                  style={{
-                    width: `${Math.max(item.count > 0 ? 4 : 0, (item.count / maxCount) * 100)}%`,
-                  }}
-                />
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

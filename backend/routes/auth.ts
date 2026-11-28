@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
-import { getDb, getDefaultRegistrationTarget } from '../db';
+import { getDb, getDefaultRegistrationTarget, getPublicSubjectsConfig } from '../db';
 import {
   type AuthedRequest,
   loginRateLimiter,
@@ -124,6 +124,7 @@ router.post('/register', registerRateLimiter, async (req, res) => {
       teacherId: assignedTeacherId,
       teacherName: defaultTarget?.teacherName || '',
       classId: assignedClassId,
+      subjectId: '',
       mustChangePassword: false,
       unreadNotifications: 0,
     },
@@ -167,6 +168,7 @@ router.post('/login', loginRateLimiter, async (req, res) => {
         student_no: string;
         teacher_id: string;
         class_id: string;
+        subject_id: string;
         is_disabled: number;
         must_change_password: number;
       }
@@ -229,15 +231,19 @@ router.post('/login', loginRateLimiter, async (req, res) => {
       teacherId: user.teacher_id || '',
       teacherName,
       classId: user.class_id || '',
+      subjectId: user.subject_id || '',
       mustChangePassword: Boolean(user.must_change_password),
       unreadNotifications: Number(unreadRow?.cnt || 0),
     },
   });
 });
 
-// 公开的前端配置：当前是本地账号模式还是平台对接模式、哪些入口开放
+// 公开的前端配置：当前是本地账号模式还是平台对接模式、已启用学科与站点标题
 router.get('/config', (_req, res) => {
-  res.json(publicAuthConfig());
+  res.json({
+    ...publicAuthConfig(),
+    ...getPublicSubjectsConfig(getDb()),
+  });
 });
 
 // 单点入口：学生或教师已在平台登录，带平台凭证进入（不调用平台的登录接口）

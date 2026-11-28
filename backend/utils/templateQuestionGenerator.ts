@@ -1,4 +1,5 @@
 import { gradeAnswerDeterministic } from '../grader';
+import { getSubjectForType } from '../../lib/subjects';
 import type {
   Checkpoint,
   DifficultyLevel,
@@ -1363,6 +1364,629 @@ ORDER BY score DESC;`;
   };
 }
 
+function buildSketch3ViewTemplate(params: TemplateGenParams): {
+  title: string;
+  scenario: string;
+  materialsDesc: string;
+  initialState: SimulatorState;
+  referenceAnswer: SimulatorState;
+  bundles: StepBundle[];
+  analysis: string[];
+  commonMistakes: string[];
+  defaultKps: string[];
+} {
+  const theme = extractThemeTitle(params.customPrompt, '阶梯槽形金属连接件');
+  const initialState: SimulatorState = {
+    partTitle: theme,
+    gridCols: 8,
+    gridRows: 6,
+    givenLines: [
+      { view: 'front', x1: 1, y1: 1, x2: 4, y2: 1, style: 'solid' },
+      { view: 'front', x1: 4, y1: 1, x2: 4, y2: 3, style: 'solid' },
+      { view: 'front', x1: 4, y1: 3, x2: 7, y2: 3, style: 'solid' },
+      { view: 'front', x1: 7, y1: 3, x2: 7, y2: 5, style: 'solid' },
+      { view: 'front', x1: 7, y1: 5, x2: 1, y2: 5, style: 'solid' },
+      { view: 'front', x1: 1, y1: 5, x2: 1, y2: 1, style: 'solid' },
+      { view: 'front', x1: 2, y1: 3, x2: 4, y2: 3, style: 'solid' },
+      { view: 'front', x1: 2, y1: 3, x2: 2, y2: 5, style: 'solid' },
+      { view: 'top', x1: 1, y1: 1, x2: 7, y2: 1, style: 'solid' },
+      { view: 'top', x1: 7, y1: 1, x2: 7, y2: 5, style: 'solid' },
+      { view: 'top', x1: 7, y1: 5, x2: 1, y2: 5, style: 'solid' },
+      { view: 'top', x1: 1, y1: 5, x2: 1, y2: 1, style: 'solid' },
+      { view: 'left', x1: 1, y1: 1, x2: 5, y2: 1, style: 'solid' },
+      { view: 'left', x1: 5, y1: 1, x2: 5, y2: 5, style: 'solid' },
+      { view: 'left', x1: 5, y1: 5, x2: 1, y2: 5, style: 'solid' },
+      { view: 'left', x1: 1, y1: 5, x2: 1, y2: 1, style: 'solid' },
+    ],
+    lines: [],
+    dimensions: [
+      { id: 'd-len', view: 'front', label: '总长 L (mm)', value: '' },
+      { id: 'd-ht', view: 'front', label: '总高 H (mm)', value: '' },
+    ],
+  };
+
+  const referenceAnswer: SimulatorState = {
+    ...initialState,
+    lines: [
+      { view: 'top', x1: 4, y1: 1, x2: 4, y2: 5, style: 'solid' },
+      { view: 'top', x1: 2, y1: 1, x2: 2, y2: 5, style: 'dashed' },
+      { view: 'left', x1: 1, y1: 3, x2: 5, y2: 3, style: 'dashed' },
+      { view: 'top', x1: 1, y1: 3, x2: 7, y2: 3, style: 'center' },
+    ],
+    dimensions: [
+      { id: 'd-len', view: 'front', label: '总长 L (mm)', value: '60' },
+      { id: 'd-ht', view: 'front', label: '总高 H (mm)', value: '40' },
+    ],
+  };
+
+  const bundles: StepBundle[] = [
+    {
+      instruction: '在【俯视图】中用“粗实线”补齐台阶分界可见轮廓线 (4,1)-(4,5)。',
+      hint: '工具栏选择「粗实线」，在俯视图依次点击 (4,1) 和 (4,5)。',
+      weight: 25,
+      checkpoints: [
+        {
+          description: '俯视图台阶分界粗实线 (4,1)-(4,5) 正确',
+          ruleType: 'sketch_line_exists',
+          params: { view: 'top', x1: 4, y1: 1, x2: 4, y2: 5, style: 'solid' },
+        },
+      ],
+    },
+    {
+      instruction: '在【俯视图】中用“虚线”补齐被顶部遮挡的通槽内壁轮廓线 (2,1)-(2,5)。',
+      hint: '切换到「虚线」工具，连接俯视图坐标 (2,1) 与 (2,5)。',
+      weight: 25,
+      checkpoints: [
+        {
+          description: '俯视图不可见通槽虚线 (2,1)-(2,5) 正确',
+          ruleType: 'sketch_line_exists',
+          params: { view: 'top', x1: 2, y1: 1, x2: 2, y2: 5, style: 'dashed' },
+        },
+      ],
+    },
+    {
+      instruction: '在【左视图】中用“虚线”补齐后方台阶面水平投影线 (1,3)-(5,3)。',
+      hint: '按“高平齐”对准主视图 y=3，在左视图用「虚线」连接 (1,3)-(5,3)。',
+      weight: 25,
+      checkpoints: [
+        {
+          description: '左视图台阶隐藏轮廓虚线 (1,3)-(5,3) 正确',
+          ruleType: 'sketch_line_exists',
+          params: { view: 'left', x1: 1, y1: 3, x2: 5, y2: 3, style: 'dashed' },
+        },
+      ],
+    },
+    {
+      instruction: '在主视图尺寸标注栏中，将“总长 L (mm)”设为 60，“总高 H (mm)”设为 40。',
+      hint: '在下方尺寸标注框分别填写 60 和 40。',
+      weight: 15,
+      checkpoints: [
+        {
+          description: '主视图总长尺寸标注为 60',
+          ruleType: 'sketch_dimension_match',
+          params: { view: 'front', label: '总长', expectedValue: '60' },
+        },
+      ],
+    },
+    {
+      instruction: '在【俯视图】中用“点画线”绘制对称中心线 (1,3)-(7,3)。',
+      hint: '选择「点画线」，在俯视图中间行 y=3 绘制对称中心轴线 (1,3)-(7,3)。',
+      weight: 10,
+      checkpoints: [
+        {
+          description: '俯视图对称中心点画线 (1,3)-(7,3) 正确',
+          ruleType: 'sketch_line_exists',
+          params: { view: 'top', x1: 1, y1: 3, x2: 7, y2: 3, style: 'center' },
+        },
+      ],
+    },
+  ];
+
+  return {
+    title: `三视图补线与标注实操：${theme}（${params.difficulty}）`,
+    scenario: `给出「${theme}」的主视图及俯、左视图外框轮廓。请根据正投影“长对正、高平齐、宽相等”规律，在三视图画板上补齐缺失轮廓线与尺寸标注。`,
+    materialsDesc: '标准三视图网格画板，支持粗实线、虚线、点画线绘制及尺寸标注。',
+    initialState,
+    referenceAnswer,
+    bundles,
+    analysis: [
+      '长对正：主视图与俯视图左右 x 坐标一一对应（x=2 与 x=4）。',
+      '高平齐：主视图与左视图上下 y 高度一一对应（y=3 台阶面）。',
+    ],
+    commonMistakes: [
+      '把看不见的内部孔槽棱线误画成粗实线（应为虚线）。',
+    ],
+    defaultKps: [
+      '正投影原理与“长对正、高平齐、宽相等”规律',
+      '不可见轮廓线（细虚线）判断与绘制',
+    ],
+  };
+}
+
+function buildCircuitTemplate(params: TemplateGenParams): {
+  title: string;
+  scenario: string;
+  materialsDesc: string;
+  initialState: SimulatorState;
+  referenceAnswer: SimulatorState;
+  bundles: StepBundle[];
+  analysis: string[];
+  commonMistakes: string[];
+  defaultKps: string[];
+} {
+  const theme = extractThemeTitle(params.customPrompt, '智能温室高温报警电路');
+  const initialState: SimulatorState = {
+    title: theme,
+    powered: false,
+    lightLevel: 50,
+    tempC: 42,
+    components: [
+      { id: 'vcc', type: 'vcc', label: '+5V 电源', x: 70, y: 70, pins: ['out'] },
+      { id: 'sw1', type: 'switch', label: '总开关 S1', x: 200, y: 70, pins: ['a', 'b'], closed: true },
+      { id: 'ntc1', type: 'sensor_temp', label: '热敏 RT (≥35℃导通)', x: 200, y: 170, pins: ['a', 'b'], value: '>=35' },
+      { id: 'q1', type: 'transistor_npn', label: '三极管 VT1', x: 360, y: 200, pins: ['b', 'c', 'e'] },
+      { id: 'bz1', type: 'buzzer', label: '蜂鸣器 HA', x: 480, y: 70, pins: ['a', 'b'] },
+      { id: 'r1', type: 'resistor', label: '限流电阻 R1', x: 480, y: 165, pins: ['a', 'b'], value: '470Ω' },
+      { id: 'gnd', type: 'gnd', label: '接地 GND', x: 360, y: 300, pins: ['in'] },
+    ],
+    wires: [
+      { from: 'vcc.out', to: 'sw1.a' },
+      { from: 'sw1.b', to: 'ntc1.a' },
+      { from: 'vcc.out', to: 'bz1.a' },
+      { from: 'q1.e', to: 'gnd.in' },
+    ],
+  };
+
+  const referenceAnswer: SimulatorState = {
+    ...initialState,
+    powered: true,
+    tempC: 42,
+    wires: [
+      { from: 'vcc.out', to: 'sw1.a' },
+      { from: 'sw1.b', to: 'ntc1.a' },
+      { from: 'vcc.out', to: 'bz1.a' },
+      { from: 'q1.e', to: 'gnd.in' },
+      { from: 'ntc1.b', to: 'q1.b' },
+      { from: 'bz1.b', to: 'r1.a' },
+      { from: 'r1.b', to: 'q1.c' },
+    ],
+  };
+
+  const bundles: StepBundle[] = [
+    {
+      instruction: '将热敏传感器输出端 (ntc1.b) 连接到 NPN 三极管 VT1 的基极 (q1.b)。',
+      hint: '点击 ntc1.b 引脚圆点，再点击 q1.b 引脚圆点完成导线连接。',
+      weight: 30,
+      checkpoints: [
+        {
+          description: '热敏传感器 ntc1.b 与三极管基极 q1.b 连接正确',
+          ruleType: 'circuit_wire_connected',
+          params: { from: 'ntc1.b', to: 'q1.b' },
+        },
+      ],
+    },
+    {
+      instruction: '将蜂鸣器下端 (bz1.b) 连接至限流电阻 R1 (r1.a)。',
+      hint: '依次点击 bz1.b 和 r1.a。',
+      weight: 25,
+      checkpoints: [
+        {
+          description: '蜂鸣器 bz1.b 与限流电阻 r1.a 连接正确',
+          ruleType: 'circuit_wire_connected',
+          params: { from: 'bz1.b', to: 'r1.a' },
+        },
+      ],
+    },
+    {
+      instruction: '将限流电阻另一端 (r1.b) 接到三极管集电极 (q1.c)，形成驱动回路。',
+      hint: '依次点击 r1.b 和 q1.c 完成开关回路闭环。',
+      weight: 20,
+      checkpoints: [
+        {
+          description: '限流电阻 r1.b 与集电极 q1.c 连接正确',
+          ruleType: 'circuit_wire_connected',
+          params: { from: 'r1.b', to: 'q1.c' },
+        },
+      ],
+    },
+    {
+      instruction: '开启「电源总开关」，测试高温 (42℃) 时蜂鸣器鸣响、常温 (22℃) 时停止报警。',
+      hint: '点击电源开关使其通电，调整温度滑块验证高低温度切换效应。',
+      weight: 25,
+      checkpoints: [
+        {
+          description: '高温工况 (42℃) 下蜂鸣器 HA 成功触发鸣响',
+          ruleType: 'circuit_sim_output',
+          params: { testPowered: true, testTempC: 42, activeOutputIds: ['bz1'], expectActive: true },
+        },
+      ],
+    },
+  ];
+
+  return {
+    title: `电子控制电路连线与调试：${theme}（${params.difficulty}）`,
+    scenario: `设计「${theme}」，当环境温度 ≥ 35℃ 时热敏传感器导通，触发三极管 VT1 开关导通，驱动蜂鸣器 HA 鸣响报警。请完成实验板缺失接线并通电调试。`,
+    materialsDesc: '交互式电子控制实验板，包含 +5V 电源、热敏传感器、NPN 三极管、限流电阻与蜂鸣器。',
+    initialState,
+    referenceAnswer,
+    bundles,
+    analysis: [
+      '传感器控制信号输入到 NPN 三极管基极 B，发射极 E 接地，集电极 C 串联负载与限流电阻接电源正极。',
+    ],
+    commonMistakes: [
+      '把传感信号接错到发射极 E 或漏接限流电阻造成电流过大/短路。',
+    ],
+    defaultKps: [
+      '热敏传感器（NTC/PTC）温度阈值控制应用',
+      'NPN 型三极管放大与开关状态（基极 B 触发导通）',
+    ],
+  };
+}
+
+function buildStructureTemplate(params: TemplateGenParams): {
+  title: string;
+  scenario: string;
+  materialsDesc: string;
+  initialState: SimulatorState;
+  referenceAnswer: SimulatorState;
+  bundles: StepBundle[];
+  analysis: string[];
+  commonMistakes: string[];
+  defaultKps: string[];
+} {
+  const theme = extractThemeTitle(params.customPrompt, '户外广告牌支撑桁架');
+  const initialState: SimulatorState = {
+    taskTitle: theme,
+    nodes: [
+      { id: 'A', x: 70, y: 200, label: '左支座 A', fixed: true },
+      { id: 'B', x: 250, y: 200, label: '右支座 B', fixed: true },
+      { id: 'C', x: 250, y: 65, label: '右上角 C' },
+      { id: 'D', x: 70, y: 65, label: '左上角 D' },
+    ],
+    baseMembers: [
+      { from: 'A', to: 'B', material: 'wood' },
+      { from: 'B', to: 'C', material: 'wood' },
+      { from: 'C', to: 'D', material: 'wood' },
+      { from: 'D', to: 'A', material: 'wood' },
+    ],
+    members: [],
+    jointType: 'hinged',
+    supportBaseWidth: 90,
+    testLoadN: 240,
+  };
+
+  const referenceAnswer: SimulatorState = {
+    ...initialState,
+    members: [{ from: 'A', to: 'C', material: 'steel' }],
+    jointType: 'rigid',
+    supportBaseWidth: 150,
+  };
+
+  const bundles: StepBundle[] = [
+    {
+      instruction: '选用“钢材 (steel)”，在节点 A 与 C 之间添加一条对角线斜撑杆件。',
+      hint: '材料栏点击「钢材」，依次点击节点 A 与节点 C。',
+      weight: 35,
+      checkpoints: [
+        {
+          description: '在节点 A 与 C 之间添加了钢材斜撑杆件',
+          ruleType: 'structure_member_exists',
+          params: { from: 'A', to: 'C', material: 'steel' },
+        },
+      ],
+    },
+    {
+      instruction: '将节点连接方式从“铰连接”切换为“刚连接”。',
+      hint: '在连接方式控制按钮组点击「刚连接」。',
+      weight: 20,
+      checkpoints: [
+        {
+          description: '节点连接方式已设置为刚连接',
+          ruleType: 'structure_joint_style',
+          params: { jointType: 'rigid' },
+        },
+      ],
+    },
+    {
+      instruction: '将底座支撑宽度滑块拖动增大至不少于 140 mm，增强抗倾倒稳定性。',
+      hint: '调宽底座支撑宽度至 ≥ 140 mm。',
+      weight: 20,
+      checkpoints: [
+        {
+          description: '底座支撑宽度不小于 140 mm',
+          ruleType: 'structure_joint_style',
+          params: { minBaseWidth: 140 },
+        },
+      ],
+    },
+    {
+      instruction: '观察荷载测评区，确保形成 ≥ 2 个稳定三角形且安全系数 ≥ 1.2 承载 240 N 载荷。',
+      hint: '完成斜撑、刚连接和扩宽底座后即可通过稳态测试。',
+      weight: 25,
+      checkpoints: [
+        {
+          description: '结构形成 ≥ 2 个三角形且安全系数 ≥ 1.2',
+          ruleType: 'structure_load_safe',
+          params: { minTriangles: 2, minSafetyFactor: 1.2 },
+        },
+      ],
+    },
+  ];
+
+  return {
+    title: `结构稳定性与承载加固设计：${theme}（${params.difficulty}）`,
+    scenario: `针对「${theme}」矩形基础框架，在顶部施加 240 N 载荷测试。请通过增设斜撑、优化连接方式及底座支撑宽度，使其满足安全系数 ≥ 1.2 的稳固要求。`,
+    materialsDesc: '交互式二维桁架力学实验台，支持杆件选材连线、连接方式切换与实时安全系数验算。',
+    initialState,
+    referenceAnswer,
+    bundles,
+    analysis: [
+      '三角形结构具有几何不变性，能显著增强框架抗侧向变形与抗压承载能力。',
+    ],
+    commonMistakes: [
+      '保留铰连接且未加斜撑导致框架受压变形倾倒。',
+    ],
+    defaultKps: [
+      '三角形稳定性原理与四边形框架斜撑加固',
+      '连接方式（铰连接与刚连接）对强度和变形的影响',
+    ],
+  };
+}
+
+function buildControlTemplate(params: TemplateGenParams): {
+  title: string;
+  scenario: string;
+  materialsDesc: string;
+  initialState: SimulatorState;
+  referenceAnswer: SimulatorState;
+  bundles: StepBundle[];
+  analysis: string[];
+  commonMistakes: string[];
+  defaultKps: string[];
+} {
+  const theme = extractThemeTitle(params.customPrompt, '智能恒温孵化箱');
+  const initialState: SimulatorState = {
+    systemTitle: `${theme}温度控制系统`,
+    mode: 'open',
+    availableOptions: [
+      '设定目标温度(37.8℃)',
+      '温度比较器',
+      '单片机控制器',
+      '电加热丝',
+      '孵化箱内部空间',
+      '箱内实际温度',
+      '热敏温度传感器',
+    ],
+    slots: {
+      input: '',
+      comparator: '',
+      controller: '',
+      actuator: '',
+      plant: '',
+      sensor: '',
+      output: '',
+    },
+    hasFeedbackEdge: false,
+    disturbance: '箱门开启热量散失',
+  };
+
+  const referenceAnswer: SimulatorState = {
+    ...initialState,
+    mode: 'closed',
+    slots: {
+      input: '设定目标温度(37.8℃)',
+      comparator: '温度比较器',
+      controller: '单片机控制器',
+      actuator: '电加热丝',
+      plant: '孵化箱内部空间',
+      sensor: '热敏温度传感器',
+      output: '箱内实际温度',
+    },
+    hasFeedbackEdge: true,
+  };
+
+  const bundles: StepBundle[] = [
+    {
+      instruction: '根据“实时测温并反馈对比”的控制特征，将控制类型设为“闭环控制”。',
+      hint: '点击顶部控制类型按钮「闭环控制」。',
+      weight: 20,
+      checkpoints: [
+        {
+          description: '控制模式设为闭环控制',
+          ruleType: 'control_mode_match',
+          params: { expectedMode: 'closed' },
+        },
+      ],
+    },
+    {
+      instruction: '指派控制器方框为“单片机控制器”，执行器方框为“电加热丝”。',
+      hint: '在控制器与执行器槽位下拉选择对应器件。',
+      weight: 30,
+      checkpoints: [
+        {
+          description: '控制器与执行器选配正确',
+          ruleType: 'control_slot_match',
+          params: { slot: 'controller', expectedValue: '单片机控制器' },
+        },
+      ],
+    },
+    {
+      instruction: '指派被控对象为“孵化箱内部空间”，给定量为“设定目标温度(37.8℃)”，被控量为“箱内实际温度”。',
+      hint: '区分给定量（输入期望）与被控量（实际输出）及被控对象。',
+      weight: 25,
+      checkpoints: [
+        {
+          description: '被控对象配置正确',
+          ruleType: 'control_slot_match',
+          params: { slot: 'plant', expectedValue: '孵化箱内部空间' },
+        },
+      ],
+    },
+    {
+      instruction: '选配比较器（温度比较器）、检测装置（热敏温度传感器），并开启“连接检测反馈通道”。',
+      hint: '勾选连接反馈通道并选择检测传感器与比较器。',
+      weight: 25,
+      checkpoints: [
+        {
+          description: '闭环反馈回路及检测传感器完整',
+          ruleType: 'control_feedback_valid',
+          params: { expectFeedback: true },
+        },
+      ],
+    },
+  ];
+
+  return {
+    title: `控制系统框图分析与设计：${theme}（${params.difficulty}）`,
+    scenario: `某「${theme}」要求精准维持 37.8℃ 恒温环境，采用传感器监测箱内温度并与设定值比较，进而控制电加热丝通断。请完成控制模式判断、各环节填图及反馈通道搭建。`,
+    materialsDesc: '控制系统方框图编辑器，支持开闭环模式切换与信号槽位配置。',
+    initialState,
+    referenceAnswer,
+    bundles,
+    analysis: [
+      '单片机为控制核心（控制器），电加热丝执行加热动作（执行器），传感器构成闭环负反馈。',
+    ],
+    commonMistakes: [
+      '混淆执行器与被控对象。',
+      '闭环系统遗漏开启反馈连线或传感器方框。',
+    ],
+    defaultKps: [
+      '闭环控制系统组成（比较器、检测装置与反馈环节）',
+      '控制器（决策核心）与执行器（动作部件）识别选配',
+    ],
+  };
+}
+
+function buildCraftTemplate(params: TemplateGenParams): {
+  title: string;
+  scenario: string;
+  materialsDesc: string;
+  initialState: SimulatorState;
+  referenceAnswer: SimulatorState;
+  bundles: StepBundle[];
+  analysis: string[];
+  commonMistakes: string[];
+  defaultKps: string[];
+} {
+  const theme = extractThemeTitle(params.customPrompt, '扁钢书挡支架');
+  const initialState: SimulatorState = {
+    taskTitle: `${theme}金工加工与质检`,
+    availableSteps: ['锉削去毛刺', '划线与样冲冲眼', '锯割下料', '台钻钻安装孔', '弯折与表面涂漆'],
+    orderedSteps: [],
+    availableTools: ['划针与钢直尺', '手锯与台虎钳', '板锉与角尺', '台钻与平口钳', '折弯机与防锈漆'],
+    selectedTools: {},
+    safetyOptions: [
+      '台钻钻孔时严禁佩戴手套',
+      '钻孔前用平口钳夹紧工件',
+      '钻孔时佩戴护目镜防护碎屑',
+      '戴线手套防止钻头划伤手指',
+    ],
+    safetyChecks: [],
+    caliperMainMm: 18,
+    caliperVernierDiv: 4,
+    caliperReading: '',
+  };
+
+  const referenceAnswer: SimulatorState = {
+    ...initialState,
+    orderedSteps: ['划线与样冲冲眼', '锯割下料', '锉削去毛刺', '台钻钻安装孔', '弯折与表面涂漆'],
+    selectedTools: {
+      '划线与样冲冲眼': '划针与钢直尺',
+      '锯割下料': '手锯与台虎钳',
+      '锉削去毛刺': '板锉与角尺',
+      '台钻钻安装孔': '台钻与平口钳',
+      '弯折与表面涂漆': '折弯机与防锈漆',
+    },
+    safetyChecks: [
+      '台钻钻孔时严禁佩戴手套',
+      '钻孔前用平口钳夹紧工件',
+      '钻孔时佩戴护目镜防护碎屑',
+    ],
+    caliperReading: '18.20',
+  };
+
+  const bundles: StepBundle[] = [
+    {
+      instruction: '按金工工艺顺序依次排好 5 道工序：划线与样冲冲眼 → 锯割下料 → 锉削去毛刺 → 台钻钻安装孔 → 弯折与表面涂漆。',
+      hint: '点击待选工序加入工艺卡列表，按“划线→锯→锉→钻→弯折涂饰”排列。',
+      weight: 30,
+      checkpoints: [
+        {
+          description: '5 道金工工艺流程顺序完全正确',
+          ruleType: 'craft_order_before',
+          params: {
+            exactOrder: ['划线与样冲冲眼', '锯割下料', '锉削去毛刺', '台钻钻安装孔', '弯折与表面涂漆'],
+          },
+        },
+      ],
+    },
+    {
+      instruction: '为「划线与样冲冲眼」选配“划针与钢直尺”，为「台钻钻安装孔」选配“台钻与平口钳”。',
+      hint: '在已排好的工艺卡片右侧选配工量具下拉框中选择。',
+      weight: 25,
+      checkpoints: [
+        {
+          description: '划线工序工量具选配正确',
+          ruleType: 'craft_tool_match',
+          params: { step: '划线与样冲冲眼', expectedTool: '划针与钢直尺' },
+        },
+      ],
+    },
+    {
+      instruction: '在安全操作规范中勾选全部 3 项正确做法，并确保不勾选“戴线手套防止钻头划伤手指”。',
+      hint: '台钻钻孔时严禁戴手套，必须使用平口钳夹紧工件并佩戴护目镜。',
+      weight: 20,
+      checkpoints: [
+        {
+          description: '安全操作规范勾选完整且无违规操作',
+          ruleType: 'craft_safety_checked',
+          params: {
+            requiredChecks: [
+              '台钻钻孔时严禁佩戴手套',
+              '钻孔前用平口钳夹紧工件',
+              '钻孔时佩戴护目镜防护碎屑',
+            ],
+            forbiddenChecks: ['戴线手套防止钻头划伤手指'],
+          },
+        },
+      ],
+    },
+    {
+      instruction: '读出右侧 20 分度游标卡尺测量值（主尺 18mm，游标第 4 格对齐），填入 18.20 mm。',
+      hint: '18 + 4 × 0.05 = 18.20 mm。',
+      weight: 25,
+      checkpoints: [
+        {
+          description: '20分度游标卡尺读数 18.20 mm 正确',
+          ruleType: 'craft_reading_approx',
+          params: { expectedReading: 18.2, tolerance: 0.03 },
+        },
+      ],
+    },
+  ];
+
+  return {
+    title: `加工工艺流程与精密测量：${theme}（${params.difficulty}）`,
+    scenario: `某通用技术小组计划制作「${theme}」，请规划规范的金属加工工艺流程、选配各环节工量具、核查安全守则并完成游标卡尺读数。`,
+    materialsDesc: '工艺排序与游标卡尺仿真检验台。',
+    initialState,
+    referenceAnswer,
+    bundles,
+    analysis: [
+      '遵循先基准划线后切削整形、先钻孔后弯折涂饰的安全加工原则。',
+      '20分度游标卡尺精度 0.05mm，18mm + 4×0.05mm = 18.20mm。',
+    ],
+    commonMistakes: [
+      '先弯折后钻孔导致无法在台钻平面稳固夹持。',
+      '误勾选“钻孔戴线手套”。',
+    ],
+    defaultKps: [
+      '金属加工通用流程（划线→锯割→锉削→钻孔→装配）',
+      '游标卡尺主尺整毫米数与游标对齐格数读数方法',
+    ],
+  };
+}
+
 export function generateQuestionFromTemplate(
   params: TemplateGenParams
 ): Question {
@@ -1381,7 +2005,17 @@ export function generateQuestionFromTemplate(
             ? buildFileTemplate(params)
             : params.type === 'python'
               ? buildPythonTemplate(params)
-              : buildDatabaseTemplate(params);
+              : params.type === 'database'
+                ? buildDatabaseTemplate(params)
+                : params.type === 'sketch3view'
+                  ? buildSketch3ViewTemplate(params)
+                  : params.type === 'circuit'
+                    ? buildCircuitTemplate(params)
+                    : params.type === 'structure'
+                      ? buildStructureTemplate(params)
+                      : params.type === 'control'
+                        ? buildControlTemplate(params)
+                        : buildCraftTemplate(params);
 
   const { steps, checkpoints } = buildStepsAndCheckpoints(
     built.bundles,
@@ -1412,6 +2046,7 @@ export function generateQuestionFromTemplate(
 
   return {
     id: idPrefix,
+    subjectId: getSubjectForType(params.type),
     title: built.title,
     type: params.type,
     difficulty: params.difficulty,

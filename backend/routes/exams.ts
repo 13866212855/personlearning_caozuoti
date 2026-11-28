@@ -173,6 +173,7 @@ router.get('/', (req: AuthedRequest, res) => {
 
     const card = {
       id: examId,
+      subjectId: String(e.subject_id || 'it'),
       title: e.title,
       description: e.description,
       teacherName: e.teacher_name || e.teacher_username || '任课教师',
@@ -350,6 +351,7 @@ router.post('/:id/start', (req: AuthedRequest, res) => {
     attemptNo: subRow.attempt_no,
     exam: {
       id: examId,
+      subjectId: String(exam.subject_id || 'it'),
       title: exam.title,
       description: exam.description,
       duration: exam.duration,

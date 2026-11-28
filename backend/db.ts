@@ -5,7 +5,8 @@ import bcrypt from 'bcryptjs';
 import { APP_CONFIG } from './config';
 import { BUILTIN_KNOWLEDGE_POINTS } from './seed/knowledgePoints';
 import { SEED_QUESTIONS } from './seed/questions';
-import type { Question, QuestionVisibility } from './types';
+import type { Question, QuestionType, QuestionVisibility, SubjectId } from './types';
+import { SUBJECT_PACKS, computeSiteTitle, getSubjectForType, getSubjectTypes } from '../lib/subjects';
 
 let dbInstance: Database.Database | null = null;
 
@@ -212,6 +213,17 @@ function runSchemaAndMigrations(db: Database.Database) {
       value TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS subjects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      short_name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      is_enabled INTEGER NOT NULL DEFAULT 1,
+      is_default INTEGER NOT NULL DEFAULT 0,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   // Non-destructive column additions on existing tables
@@ -354,6 +366,30 @@ function runSchemaAndMigrations(db: Database.Database) {
       ON classes(platform_class_id) WHERE platform_class_id IS NOT NULL;
   `);
 
+  // 多学科扩展字段（只增列，不破坏现有数据）
+  if (!hasColumn(db, 'knowledge_points', 'subject_id')) {
+    db.exec("ALTER TABLE knowledge_points ADD COLUMN subject_id TEXT NOT NULL DEFAULT 'it'");
+  }
+  if (!hasColumn(db, 'questions', 'subject_id')) {
+    db.exec("ALTER TABLE questions ADD COLUMN subject_id TEXT NOT NULL DEFAULT 'it'");
+  }
+  if (!hasColumn(db, 'exams', 'subject_id')) {
+    db.exec("ALTER TABLE exams ADD COLUMN subject_id TEXT NOT NULL DEFAULT 'it'");
+  }
+  if (!hasColumn(db, 'users', 'subject_id')) {
+    db.exec("ALTER TABLE users ADD COLUMN subject_id TEXT NOT NULL DEFAULT ''");
+  }
+  db.exec(`
+    UPDATE questions
+    SET subject_id = 'gt'
+    WHERE type IN ('sketch3view', 'circuit', 'structure', 'control', 'craft')
+      AND subject_id <> 'gt';
+    UPDATE knowledge_points
+    SET subject_id = 'gt'
+    WHERE type IN ('sketch3view', 'circuit', 'structure', 'control', 'craft')
+      AND subject_id <> 'gt';
+  `);
+
   // Non-destructive migration from legacy students & admins tables into users
   const now = new Date().toISOString();
   if (tableExists(db, 'admins')) {
@@ -471,11 +507,38 @@ function initializeDefaults(db: Database.Database) {
     seedDemoSchoolData(db, now);
   }
 
+  // 2.5 Seed enabled subjects (IT & GT both enabled by default; IT default)
+  const insertSubj = db.prepare(
+    `INSERT OR IGNORE INTO subjects (id, name, short_name, description, is_enabled, is_default, sort_order, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  insertSubj.run(
+    'it',
+    SUBJECT_PACKS.it.name,
+    SUBJECT_PACKS.it.shortName,
+    SUBJECT_PACKS.it.description,
+    1,
+    1,
+    1,
+    now
+  );
+  insertSubj.run(
+    'gt',
+    SUBJECT_PACKS.gt.name,
+    SUBJECT_PACKS.gt.shortName,
+    SUBJECT_PACKS.gt.description,
+    1,
+    0,
+    2,
+    now
+  );
+
   // 3. Seed/sync built-in system knowledge points (adds newly expanded points to existing DBs)
   const upsertKp = db.prepare(
-    `INSERT INTO knowledge_points (id, type, chapter, name, is_system, owner_id, created_at)
-     VALUES (?, ?, ?, ?, 1, '', ?)
+    `INSERT INTO knowledge_points (id, subject_id, type, chapter, name, is_system, owner_id, created_at)
+     VALUES (?, ?, ?, ?, ?, 1, '', ?)
      ON CONFLICT(id) DO UPDATE SET
+       subject_id = excluded.subject_id,
        type = excluded.type,
        chapter = excluded.chapter,
        name = excluded.name
@@ -483,7 +546,7 @@ function initializeDefaults(db: Database.Database) {
   );
   const txKp = db.transaction(() => {
     for (const kp of BUILTIN_KNOWLEDGE_POINTS) {
-      upsertKp.run(kp.id, kp.type, kp.chapter, kp.name, now);
+      upsertKp.run(kp.id, getSubjectForType(kp.type), kp.type, kp.chapter, kp.name, now);
     }
   });
   txKp();
@@ -491,17 +554,18 @@ function initializeDefaults(db: Database.Database) {
   // 4. Seed/sync built-in questions (INSERT OR IGNORE adds newly added question types to existing DBs)
   const insertQ = db.prepare(`
     INSERT OR IGNORE INTO questions (
-      id, title, type, difficulty, knowledge_points_json, knowledge_point_ids_json, scenario,
+      id, subject_id, title, type, difficulty, knowledge_points_json, knowledge_point_ids_json, scenario,
       total_score, materials_json, steps_json, checkpoints_json,
       reference_answer_json, analysis_json, common_mistakes_json,
       status, source, owner_id, visibility, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'system', 'public', ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'system', 'public', ?, ?)
   `);
 
   const txQ = db.transaction((questions: Omit<Question, 'ownerId' | 'visibility'>[]) => {
     for (const q of questions) {
       insertQ.run(
         q.id,
+        q.subjectId || getSubjectForType(q.type),
         q.title,
         q.type,
         q.difficulty,
@@ -712,12 +776,137 @@ function seedSampleExam(db: Database.Database, now: string) {
       now
     );
   }
+  // 自动补发一套「高中通用技术会考·实践操作综合模拟测试」（覆盖五大通用技术实操模块）
+  const gtExam = db
+    .prepare("SELECT id FROM exams WHERE id = 'exam-seed-gt-1'")
+    .get();
+  if (!gtExam) {
+    const startTime = new Date(Date.now() - 3600 * 1000).toISOString();
+    const endTime = new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString();
+    const gtExamId = 'exam-seed-gt-1';
+    db.prepare(
+      `INSERT OR IGNORE INTO exams (
+        id, subject_id, title, description, teacher_id, duration, start_time, end_time,
+        max_attempts, score_policy, show_score_immediately, show_answer_policy,
+        shuffle, anti_cheat_switch, allow_late, status, created_at, updated_at
+      ) VALUES (?, 'gt', ?, ?, ?, 45, ?, ?, 3, 'highest', 1, 'immediate', 0, 0, 1, 'published', ?, ?)`
+    ).run(
+      gtExamId,
+      '高中通用技术会考·实践操作综合模拟测试',
+      '覆盖三视图补线与尺寸标注、电子控制电路连线调试、结构受力稳定实验、控制系统方框图与金工木工工艺流程五大通用技术实操题型。',
+      teacherRow.id,
+      startTime,
+      endTime,
+      now,
+      now
+    );
+
+    const gtQIds = [
+      'seed-gt-sketch-1',
+      'seed-gt-circuit-1',
+      'seed-gt-structure-1',
+      'seed-gt-control-1',
+      'seed-gt-craft-1',
+    ];
+    const insertEqGt = db.prepare(
+      `INSERT OR IGNORE INTO exam_questions (id, exam_id, question_id, sort_order, score)
+       VALUES (?, ?, ?, ?, 100)`
+    );
+    gtQIds.forEach((qid, idx) => {
+      insertEqGt.run(`eq-seed-gt-${idx + 1}`, gtExamId, qid, idx + 1);
+    });
+
+    db.prepare(
+      `INSERT OR IGNORE INTO exam_assignments (id, exam_id, target_type, target_id)
+       VALUES ('ea-seed-gt-1', ?, 'class', ?)`
+    ).run(gtExamId, defaultClass.id);
+
+    db.prepare(
+      `INSERT OR IGNORE INTO notifications (id, user_id, sender_id, type, title, content, link, is_read, created_at)
+       VALUES ('notif-seed-gt-1', 'student-demo-1', ?, 'exam_published', ?, ?, '/', 0, ?)`
+    ).run(
+      teacherRow.id,
+      '新增通用技术实践操作模拟卷',
+      '系统已新增「高中通用技术会考·实践操作综合模拟测试」（5 道仿真交互操作题），欢迎体验！',
+      now
+    );
+  }
 }
+
+export interface SubjectConfigSummary {
+  id: SubjectId;
+  name: string;
+  shortName: string;
+  description: string;
+  isEnabled: boolean;
+  isDefault: boolean;
+  sortOrder: number;
+  questionTypes: QuestionType[];
+}
+
+export function getPublicSubjectsConfig(dbArg?: Database.Database): {
+  subjects: SubjectConfigSummary[];
+  enabledSubjects: SubjectConfigSummary[];
+  defaultSubjectId: SubjectId;
+  siteTitle: string;
+  customSiteTitle: string;
+} {
+  const db = dbArg ?? getDb();
+  const rows = db
+    .prepare('SELECT * FROM subjects ORDER BY sort_order ASC, id ASC')
+    .all() as Array<{
+    id: string;
+    name: string;
+    short_name: string;
+    description: string;
+    is_enabled: number;
+    is_default: number;
+    sort_order: number;
+  }>;
+
+  const subjects: SubjectConfigSummary[] = rows.map((r) => {
+    const sid = (r.id === 'gt' ? 'gt' : 'it') as SubjectId;
+    return {
+      id: sid,
+      name: r.name,
+      shortName: r.short_name,
+      description: r.description,
+      isEnabled: Boolean(r.is_enabled),
+      isDefault: Boolean(r.is_default),
+      sortOrder: Number(r.sort_order || 0),
+      questionTypes: getSubjectTypes(sid),
+    };
+  });
+
+  const enabledSubjects = subjects.filter((s) => s.isEnabled);
+  const defaultRow =
+    enabledSubjects.find((s) => s.isDefault) ||
+    enabledSubjects[0] ||
+    subjects[0];
+  const defaultSubjectId: SubjectId = defaultRow ? defaultRow.id : 'it';
+
+  const customRow = db
+    .prepare("SELECT value FROM system_settings WHERE key = 'site_title'")
+    .get() as { value: string } | undefined;
+  const customSiteTitle = (customRow?.value || '').trim();
+  const siteTitle = computeSiteTitle(enabledSubjects, customSiteTitle);
+
+  return {
+    subjects,
+    enabledSubjects,
+    defaultSubjectId,
+    siteTitle,
+    customSiteTitle,
+  };
+}
+
 export function rowToQuestion(row: Record<string, unknown>): Question {
+  const type = row.type as Question['type'];
   return {
     id: String(row.id),
+    subjectId: ((row.subject_id as SubjectId) || getSubjectForType(type)),
     title: String(row.title),
-    type: row.type as Question['type'],
+    type,
     difficulty: row.difficulty as Question['difficulty'],
     knowledgePoints: JSON.parse(String(row.knowledge_points_json || '[]')),
     knowledgePointIds: JSON.parse(String(row.knowledge_point_ids_json || '[]')),

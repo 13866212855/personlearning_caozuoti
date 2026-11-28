@@ -29,6 +29,7 @@ import {
   portalFetch,
   setCachedPortalUser,
 } from '@/lib/api';
+import { SUBJECT_LABELS } from '@/lib/subjects';
 import type { PortalUser } from '@/lib/types';
 
 type TeacherTab =
@@ -139,13 +140,14 @@ export default function TeacherWorkbenchPage() {
           <div className="w-8 h-8 rounded-lg bg-sky-600 text-white flex items-center justify-center">
             <GraduationCap className="w-4 h-4" />
           </div>
-          <span>高中信息技术会考 · 教师教学工作台</span>
+          <span>{auth?.siteTitle || '高中会考实操练习与测评系统'} · 教师工作台</span>
         </div>
 
         <div className="flex items-center gap-4 text-xs">
           <span className="text-slate-600 hidden sm:inline">
             <BookOpen className="w-3.5 h-3.5 inline mr-1 text-sky-600" />
-            {teacher.realName} 老师（{teacher.username}）
+            {teacher.realName} 老师（{teacher.username}） ·{' '}
+            {teacher.subjectId ? SUBJECT_LABELS[teacher.subjectId] : '全学科'}
           </span>
           {auth?.mode === 'platform' && auth.platformWebUrl && (
             <a

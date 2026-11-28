@@ -11,14 +11,17 @@ import {
   X,
 } from 'lucide-react';
 import { adminFetch } from '@/lib/api';
+import { SUBJECT_LABELS, SUBJECT_PACKS, getSubjectForType } from '@/lib/subjects';
 import {
   TYPE_LABELS,
   type DifficultyLevel,
   type QuestionType,
+  type SubjectId,
 } from '@/lib/types';
 
 interface AdminQuestion {
   id: string;
+  subjectId?: SubjectId;
   title: string;
   type: QuestionType;
   difficulty: DifficultyLevel;
@@ -43,6 +46,7 @@ export default function AdminQuestionsTab() {
   const [loading, setLoading] = useState(true);
 
   const [keyword, setKeyword] = useState('');
+  const [subjectFilter, setSubjectFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [diffFilter, setDiffFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -76,6 +80,7 @@ export default function AdminQuestionsTab() {
       try {
         const qs = new URLSearchParams({ page: String(p), pageSize: '10' });
         if (keyword.trim()) qs.set('keyword', keyword.trim());
+        if (subjectFilter) qs.set('subjectId', subjectFilter);
         if (typeFilter) qs.set('type', typeFilter);
         if (diffFilter) qs.set('difficulty', diffFilter);
         if (statusFilter) qs.set('status', statusFilter);
@@ -91,13 +96,14 @@ export default function AdminQuestionsTab() {
         setLoading(false);
       }
     },
-    [page, keyword, typeFilter, diffFilter, statusFilter]
+    [page, keyword, subjectFilter, typeFilter, diffFilter, statusFilter]
   );
 
   useEffect(() => {
     let active = true;
     const qs = new URLSearchParams({ page: '1', pageSize: '10' });
     if (keyword.trim()) qs.set('keyword', keyword.trim());
+    if (subjectFilter) qs.set('subjectId', subjectFilter);
     if (typeFilter) qs.set('type', typeFilter);
     if (diffFilter) qs.set('difficulty', diffFilter);
     if (statusFilter) qs.set('status', statusFilter);
@@ -118,7 +124,7 @@ export default function AdminQuestionsTab() {
     return () => {
       active = false;
     };
-  }, [typeFilter, diffFilter, statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [subjectFilter, typeFilter, diffFilter, statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleStatus = async (q: AdminQuestion) => {
     const nextStatus = q.status === 'published' ? 'draft' : 'published';
@@ -294,17 +300,41 @@ export default function AdminQuestionsTab() {
         </div>
 
         <select
+          value={subjectFilter}
+          onChange={(e) => {
+            setSubjectFilter(e.target.value);
+            setTypeFilter('');
+          }}
+          className="h-8 px-2.5 border border-slate-200 rounded-lg bg-white"
+        >
+          <option value="">全部学科</option>
+          <option value="it">高中信息技术</option>
+          <option value="gt">高中通用技术</option>
+        </select>
+        <select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}
           className="h-8 px-2.5 border border-slate-200 rounded-lg bg-white"
         >
           <option value="">全部题型</option>
-          <option value="word">Word 文字处理</option>
-          <option value="excel">Excel 电子表格</option>
-          <option value="web">网页制作</option>
-          <option value="file">文件管理</option>
-          <option value="python">Python 程序设计</option>
-          <option value="database">数据库与 SQL 查询</option>
+          {(!subjectFilter || subjectFilter === 'it') && (
+            <optgroup label="高中信息技术">
+              {SUBJECT_PACKS.it.questionTypes.map((qt) => (
+                <option key={qt} value={qt}>
+                  {TYPE_LABELS[qt]}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {(!subjectFilter || subjectFilter === 'gt') && (
+            <optgroup label="高中通用技术">
+              {SUBJECT_PACKS.gt.questionTypes.map((qt) => (
+                <option key={qt} value={qt}>
+                  {TYPE_LABELS[qt]}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
         <select
           value={diffFilter}
@@ -353,7 +383,10 @@ export default function AdminQuestionsTab() {
                       {q.title}
                     </td>
                     <td className="py-3 px-3 text-slate-600">
-                      {TYPE_LABELS[q.type]}
+                      <div>{TYPE_LABELS[q.type] || q.type}</div>
+                      <div className="text-[11px] text-slate-400">
+                        {SUBJECT_LABELS[q.subjectId || getSubjectForType(q.type)]}
+                      </div>
                     </td>
                     <td className="py-3 px-3 text-slate-600">{q.difficulty}</td>
                     <td className="py-3 px-3 text-slate-500">
@@ -471,12 +504,20 @@ export default function AdminQuestionsTab() {
                     onChange={(e) => setGenType(e.target.value as QuestionType)}
                     className="w-full h-9 px-2.5 border border-slate-300 rounded-lg bg-white"
                   >
-                    <option value="word">Word 文字处理</option>
-                    <option value="excel">Excel 电子表格</option>
-                    <option value="web">网页制作</option>
-                    <option value="file">文件管理</option>
-                    <option value="python">Python 程序设计</option>
-                    <option value="database">数据库与 SQL 查询</option>
+                    <optgroup label="高中信息技术">
+                      {SUBJECT_PACKS.it.questionTypes.map((qt) => (
+                        <option key={qt} value={qt}>
+                          {TYPE_LABELS[qt]}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="高中通用技术">
+                      {SUBJECT_PACKS.gt.questionTypes.map((qt) => (
+                        <option key={qt} value={qt}>
+                          {TYPE_LABELS[qt]}
+                        </option>
+                      ))}
+                    </optgroup>
                   </select>
                 </label>
                 <label className="space-y-1">

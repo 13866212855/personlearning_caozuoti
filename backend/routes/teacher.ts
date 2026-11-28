@@ -30,6 +30,13 @@ import type {
   QuestionType,
   SimulatorState,
 } from '../types';
+import { ALL_QUESTION_TYPES, getSubjectForType } from '../../lib/subjects';
+
+const QUESTION_TYPE_ENUM = ALL_QUESTION_TYPES as [QuestionType, ...QuestionType[]];
+const QUESTION_TYPE_FILTER_ENUM: [
+  QuestionType | '',
+  ...(QuestionType | '')[],
+] = ['', ...ALL_QUESTION_TYPES];
 
 const router = Router();
 router.use(requireTeacherAuth);
@@ -692,12 +699,20 @@ router.get('/students', (req: AuthedRequest, res) => {
 // ==================== 3. Knowledge Points & Question Bank / AI Studio ====================
 router.get('/knowledge-points', (req: AuthedRequest, res) => {
   const db = getDb();
+  const subjectId = String(req.query.subjectId || '');
+  const where = ['(is_system = 1 OR owner_id = ?)'];
+  const args: unknown[] = [req.teacher!.id];
+  if (subjectId && ['it', 'gt'].includes(subjectId)) {
+    where.push('subject_id = ?');
+    args.push(subjectId);
+  }
   const rows = db
     .prepare(
-      'SELECT * FROM knowledge_points WHERE is_system = 1 OR owner_id = ? ORDER BY type ASC, is_system DESC, chapter ASC, name ASC'
+      `SELECT * FROM knowledge_points WHERE ${where.join(' AND ')} ORDER BY type ASC, is_system DESC, chapter ASC, name ASC`
     )
-    .all(req.teacher!.id) as Array<{
+    .all(...args) as Array<{
     id: string;
+    subject_id: string;
     type: QuestionType;
     chapter: string;
     name: string;
@@ -708,6 +723,7 @@ router.get('/knowledge-points', (req: AuthedRequest, res) => {
   res.json({
     items: rows.map((r) => ({
       id: r.id,
+      subjectId: r.subject_id || getSubjectForType(r.type),
       type: r.type,
       chapter: r.chapter,
       name: r.name,
@@ -718,7 +734,7 @@ router.get('/knowledge-points', (req: AuthedRequest, res) => {
 
 router.post('/knowledge-points', (req: AuthedRequest, res) => {
   const schema = z.object({
-    type: z.enum(['word', 'excel', 'web', 'file', 'python', 'database']),
+    type: z.enum(QUESTION_TYPE_ENUM),
     chapter: z.string().trim().min(1).max(40).default('教师自定义'),
     name: z.string().trim().min(1, '知识点名称不能为空').max(40),
   });
@@ -730,11 +746,13 @@ router.post('/knowledge-points', (req: AuthedRequest, res) => {
 
   const db = getDb();
   const id = `kp-t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const subjectId = getSubjectForType(parsed.data.type);
   db.prepare(
-    `INSERT INTO knowledge_points (id, type, chapter, name, is_system, owner_id, created_at)
-     VALUES (?, ?, ?, ?, 0, ?, ?)`
+    `INSERT INTO knowledge_points (id, subject_id, type, chapter, name, is_system, owner_id, created_at)
+     VALUES (?, ?, ?, ?, ?, 0, ?, ?)`
   ).run(
     id,
+    subjectId,
     parsed.data.type,
     parsed.data.chapter,
     parsed.data.name,
@@ -745,6 +763,7 @@ router.post('/knowledge-points', (req: AuthedRequest, res) => {
   res.status(201).json({
     item: {
       id,
+      subjectId,
       type: parsed.data.type,
       chapter: parsed.data.chapter,
       name: parsed.data.name,
@@ -756,7 +775,7 @@ router.post('/knowledge-points', (req: AuthedRequest, res) => {
 router.post('/questions/ai-generate', async (req: AuthedRequest, res) => {
   const schema = z.object({
     mode: z.enum(['ai', 'template']).default('ai'),
-    type: z.enum(['word', 'excel', 'web', 'file', 'python', 'database']),
+    type: z.enum(QUESTION_TYPE_ENUM),
     difficulty: z.enum(['基础', '中等', '提高']).default('中等'),
     count: z.number().int().min(1).max(5).default(1),
     stepCount: z.number().int().min(3).max(8).default(4),
@@ -848,7 +867,7 @@ router.post('/questions/ai-generate', async (req: AuthedRequest, res) => {
 // Teacher "试做" simulator verification
 router.post('/questions/test-grade', (req: AuthedRequest, res) => {
   const schema = z.object({
-    type: z.enum(['word', 'excel', 'web', 'file', 'python', 'database']),
+    type: z.enum(QUESTION_TYPE_ENUM),
     checkpoints: z.array(z.record(z.string(), z.unknown())),
     answer: z.record(z.string(), z.unknown()),
   });
@@ -869,6 +888,7 @@ router.post('/questions/test-grade', (req: AuthedRequest, res) => {
 router.get('/questions', (req: AuthedRequest, res) => {
   const db = getDb();
   const scope = String(req.query.scope || 'all'); // all | mine | system | shared
+  const subjectId = String(req.query.subjectId || '');
   const type = String(req.query.type || '');
   const difficulty = String(req.query.difficulty || '');
   const kp = String(req.query.knowledgePoint || '');
@@ -893,7 +913,11 @@ router.get('/questions', (req: AuthedRequest, res) => {
     args.push(req.teacher!.id);
   }
 
-  if (type && ['word', 'excel', 'web', 'file', 'python', 'database'].includes(type)) {
+  if (subjectId && ['it', 'gt'].includes(subjectId)) {
+    where.push('q.subject_id = ?');
+    args.push(subjectId);
+  }
+  if (type && ALL_QUESTION_TYPES.includes(type as QuestionType)) {
     where.push('q.type = ?');
     args.push(type);
   }
@@ -946,7 +970,7 @@ router.get('/questions', (req: AuthedRequest, res) => {
 router.post('/questions', (req: AuthedRequest, res) => {
   const schema = z.object({
     title: z.string().trim().min(2),
-    type: z.enum(['word', 'excel', 'web', 'file', 'python', 'database']),
+    type: z.enum(QUESTION_TYPE_ENUM),
     difficulty: z.enum(['基础', '中等', '提高']),
     knowledgePoints: z.array(z.string()).default([]),
     knowledgePointIds: z.array(z.string()).default([]),
@@ -970,17 +994,19 @@ router.post('/questions', (req: AuthedRequest, res) => {
   const db = getDb();
   const d = parsed.data;
   const id = `tq-${d.type}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const subjectId = getSubjectForType(d.type);
   const now = new Date().toISOString();
 
   db.prepare(
     `INSERT INTO questions (
-      id, title, type, difficulty, knowledge_points_json, knowledge_point_ids_json,
+      id, subject_id, title, type, difficulty, knowledge_points_json, knowledge_point_ids_json,
       scenario, total_score, materials_json, steps_json, checkpoints_json,
       reference_answer_json, analysis_json, common_mistakes_json,
       status, source, owner_id, visibility, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published', ?, ?, ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published', ?, ?, ?, ?, ?)`
   ).run(
     id,
+    subjectId,
     d.title,
     d.type,
     d.difficulty,
@@ -1001,7 +1027,7 @@ router.post('/questions', (req: AuthedRequest, res) => {
     now
   );
 
-  res.status(201).json({ id });
+  res.status(201).json({ id, subjectId });
 });
 
 router.put('/questions/:id', (req: AuthedRequest, res) => {
@@ -1069,13 +1095,14 @@ router.post('/questions/:id/copy', (req: AuthedRequest, res) => {
 
   db.prepare(
     `INSERT INTO questions (
-      id, title, type, difficulty, knowledge_points_json, knowledge_point_ids_json,
+      id, subject_id, title, type, difficulty, knowledge_points_json, knowledge_point_ids_json,
       scenario, total_score, materials_json, steps_json, checkpoints_json,
       reference_answer_json, analysis_json, common_mistakes_json,
       status, source, owner_id, visibility, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published', ?, ?, 'private', ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published', ?, ?, 'private', ?, ?)`
   ).run(
     newId,
+    q.subjectId || getSubjectForType(q.type),
     `${q.title}（副本）`,
     q.type,
     q.difficulty,
@@ -1190,15 +1217,21 @@ router.post('/questions/assign', (req: AuthedRequest, res) => {
   const examId = `exam-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   let notifiedCount = 0;
 
+  const qSubjectRows = db
+    .prepare(`SELECT id, subject_id FROM questions WHERE id IN (${qPlaceholders})`)
+    .all(...uniqueQuestionIds) as Array<{ id: string; subject_id: string }>;
+  const examSubjectId = qSubjectRows[0]?.subject_id || 'it';
+
   const tx = db.transaction(() => {
     db.prepare(
       `INSERT INTO exams (
-        id, title, description, teacher_id, duration, start_time, end_time,
+        id, subject_id, title, description, teacher_id, duration, start_time, end_time,
         max_attempts, score_policy, show_score_immediately, show_answer_policy,
         shuffle, anti_cheat_switch, allow_late, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'highest', 1, ?, 0, ?, 1, 'published', ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'highest', 1, ?, 0, ?, 1, 'published', ?, ?)`
     ).run(
       examId,
+      examSubjectId,
       examTitle,
       '教师从题库直接分配的专项操作练习，完成后可立即查看判分与解析。',
       teacherId,
@@ -1265,7 +1298,8 @@ router.post('/questions/assign', (req: AuthedRequest, res) => {
 // ==================== 4. Teacher Exam Management ====================
 router.post('/exams/auto-pick', (req: AuthedRequest, res) => {
   const schema = z.object({
-    type: z.enum(['word', 'excel', 'web', 'file', 'python', 'database', '']).default(''),
+    subjectId: z.enum(['it', 'gt', '']).default(''),
+    type: z.enum(QUESTION_TYPE_FILTER_ENUM).default(''),
     difficulty: z.enum(['基础', '中等', '提高', '']).default(''),
     knowledgePoint: z.string().default(''),
     count: z.number().int().min(1).max(20).default(2),
@@ -1283,6 +1317,10 @@ router.post('/exams/auto-pick', (req: AuthedRequest, res) => {
     "(owner_id = ? OR visibility IN ('public', 'shared'))",
   ];
   const args: unknown[] = [req.teacher!.id];
+  if (parsed.data.subjectId) {
+    where.push('subject_id = ?');
+    args.push(parsed.data.subjectId);
+  }
   if (parsed.data.type) {
     where.push('type = ?');
     args.push(parsed.data.type);
@@ -1350,6 +1388,7 @@ router.get('/exams', (req: AuthedRequest, res) => {
   const page = Math.max(1, Number(req.query.page || 1));
   const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize || 10)));
   const statusFilter = String(req.query.status || '');
+  const subjectFilter = String(req.query.subjectId || '');
   const keyword = String(req.query.keyword || '').trim();
 
   const where = ['teacher_id = ?'];
@@ -1357,6 +1396,10 @@ router.get('/exams', (req: AuthedRequest, res) => {
   if (statusFilter) {
     where.push('status = ?');
     args.push(statusFilter);
+  }
+  if (subjectFilter && ['it', 'gt'].includes(subjectFilter)) {
+    where.push('subject_id = ?');
+    args.push(subjectFilter);
   }
   if (keyword) {
     where.push('title LIKE ?');
@@ -1423,6 +1466,7 @@ router.get('/exams', (req: AuthedRequest, res) => {
 
     return {
       id: examId,
+      subjectId: String(e.subject_id || 'it'),
       title: e.title,
       description: e.description,
       duration: e.duration,
@@ -1475,6 +1519,7 @@ router.get('/exams/:id', (req: AuthedRequest, res) => {
   res.json({
     exam: {
       id: exam.id,
+      subjectId: String(exam.subject_id || 'it'),
       title: exam.title,
       description: exam.description,
       duration: exam.duration,
@@ -1519,15 +1564,24 @@ router.post('/exams', (req: AuthedRequest, res) => {
   const now = new Date().toISOString();
   const status = d.publishNow ? 'published' : 'draft';
 
+  const firstQId = d.questions[0]?.questionId;
+  const firstQRow = firstQId
+    ? (db.prepare('SELECT subject_id FROM questions WHERE id = ?').get(firstQId) as
+        | { subject_id: string }
+        | undefined)
+    : undefined;
+  const examSubjectId = firstQRow?.subject_id || 'it';
+
   const tx = db.transaction(() => {
     db.prepare(
       `INSERT INTO exams (
-        id, title, description, teacher_id, duration, start_time, end_time,
+        id, subject_id, title, description, teacher_id, duration, start_time, end_time,
         max_attempts, score_policy, show_score_immediately, show_answer_policy,
         shuffle, anti_cheat_switch, allow_late, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       examId,
+      examSubjectId,
       d.title,
       d.description,
       req.teacher!.id,
@@ -1758,12 +1812,13 @@ router.post('/exams/:id/copy', (req: AuthedRequest, res) => {
   const tx = db.transaction(() => {
     db.prepare(
       `INSERT INTO exams (
-        id, title, description, teacher_id, duration, start_time, end_time,
+        id, subject_id, title, description, teacher_id, duration, start_time, end_time,
         max_attempts, score_policy, show_score_immediately, show_answer_policy,
         shuffle, anti_cheat_switch, allow_late, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`
     ).run(
       newId,
+      String(exam.subject_id || 'it'),
       `${exam.title}（副本）`,
       exam.description,
       req.teacher!.id,
@@ -2417,7 +2472,7 @@ router.post('/exams/:id/remind-unsubmitted', (req: AuthedRequest, res) => {
 router.post('/exams/:id/remedial-practice', async (req: AuthedRequest, res) => {
   const schema = z.object({
     knowledgePoint: z.string().min(1),
-    type: z.enum(['word', 'excel', 'web', 'file', 'python', 'database']).default('excel'),
+    type: z.enum(QUESTION_TYPE_ENUM).default('excel'),
     targetStudentIds: z.array(z.string()).min(1, '请选择需要推送补练的学生'),
   });
   const parsed = schema.safeParse(req.body);
@@ -2463,17 +2518,19 @@ router.post('/exams/:id/remedial-practice', async (req: AuthedRequest, res) => {
     const newExamId = `exam-rem-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
     const now = new Date();
     const end = new Date(now.getTime() + 7 * 24 * 3600 * 1000);
+    const subjectId = getSubjectForType(q.type);
 
     db.transaction(() => {
       db.prepare(
         `INSERT INTO questions (
-          id, title, type, difficulty, knowledge_points_json, knowledge_point_ids_json,
+          id, subject_id, title, type, difficulty, knowledge_points_json, knowledge_point_ids_json,
           scenario, total_score, materials_json, steps_json, checkpoints_json,
           reference_answer_json, analysis_json, common_mistakes_json,
           status, source, owner_id, visibility, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, 'published', 'ai', ?, 'private', ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, 'published', 'ai', ?, 'private', ?, ?)`
       ).run(
         q.id,
+        subjectId,
         q.title,
         q.type,
         q.difficulty,
@@ -2493,12 +2550,13 @@ router.post('/exams/:id/remedial-practice', async (req: AuthedRequest, res) => {
 
       db.prepare(
         `INSERT INTO exams (
-          id, title, description, teacher_id, duration, start_time, end_time,
+          id, subject_id, title, description, teacher_id, duration, start_time, end_time,
           max_attempts, score_policy, show_score_immediately, show_answer_policy,
           shuffle, anti_cheat_switch, allow_late, status, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, 25, ?, ?, 2, 'highest', 1, 'immediate', 0, 0, 1, 'published', ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, 25, ?, ?, 2, 'highest', 1, 'immediate', 0, 0, 1, 'published', ?, ?)`
       ).run(
         newExamId,
+        subjectId,
         `专项补练：${parsed.data.knowledgePoint}（${exam.title}）`,
         `针对薄弱知识点「${parsed.data.knowledgePoint}」的巩固强化练习，请在 7 天内完成。`,
         req.teacher!.id,

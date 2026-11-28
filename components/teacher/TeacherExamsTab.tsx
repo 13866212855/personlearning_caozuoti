@@ -19,12 +19,14 @@ import {
   X,
 } from 'lucide-react';
 import { portalFetch } from '@/lib/api';
+import { SUBJECT_LABELS, SUBJECT_PACKS } from '@/lib/subjects';
 import {
   TYPE_LABELS,
   type ClassItem,
   type DifficultyLevel,
   type FullQuestion,
   type QuestionType,
+  type SubjectId,
   type TeacherExamSummary,
 } from '@/lib/types';
 
@@ -59,6 +61,7 @@ export default function TeacherExamsTab({
 }: TeacherExamsTabProps) {
   const [exams, setExams] = useState<TeacherExamSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [subjectFilter, setSubjectFilter] = useState<'' | SubjectId>('');
   const [statusFilter, setStatusFilter] = useState('');
   const [keyword, setKeyword] = useState('');
   const [msg, setMsg] = useState('');
@@ -111,6 +114,7 @@ export default function TeacherExamsTab({
     setLoading(true);
     try {
       const qs = new URLSearchParams({ page: '1', pageSize: '30' });
+      if (subjectFilter) qs.set('subjectId', subjectFilter);
       if (statusFilter) qs.set('status', statusFilter);
       if (keyword.trim()) qs.set('keyword', keyword.trim());
       const res = await portalFetch<{ items: TeacherExamSummary[] }>(
@@ -122,11 +126,12 @@ export default function TeacherExamsTab({
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, keyword]);
+  }, [subjectFilter, statusFilter, keyword]);
 
   useEffect(() => {
     let active = true;
     const qs = new URLSearchParams({ page: '1', pageSize: '30' });
+    if (subjectFilter) qs.set('subjectId', subjectFilter);
     if (statusFilter) qs.set('status', statusFilter);
     portalFetch<{ items: TeacherExamSummary[] }>(
       `/api/teacher/exams?${qs.toString()}`
@@ -143,7 +148,7 @@ export default function TeacherExamsTab({
     return () => {
       active = false;
     };
-  }, [statusFilter]);
+  }, [subjectFilter, statusFilter]);
 
   const loadWizardResources = async () => {
     const [qRes, cRes, sRes] = await Promise.all([
@@ -507,6 +512,15 @@ export default function TeacherExamsTab({
       {/* Filter Bar */}
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <select
+          value={subjectFilter}
+          onChange={(e) => setSubjectFilter(e.target.value as '' | SubjectId)}
+          className="h-9 px-3 border border-slate-200 rounded-lg bg-white"
+        >
+          <option value="">全部学科</option>
+          <option value="it">高中信息技术</option>
+          <option value="gt">高中通用技术</option>
+        </select>
+        <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
           className="h-9 px-3 border border-slate-200 rounded-lg bg-white"
@@ -562,6 +576,7 @@ export default function TeacherExamsTab({
                     <td className="py-3 px-4">
                       <div className="font-semibold text-slate-900">{ex.title}</div>
                       <div className="text-[11px] text-slate-500 tabular-nums mt-0.5">
+                        {SUBJECT_LABELS[ex.subjectId || 'it']} ·{' '}
                         {new Date(ex.startTime).toLocaleDateString('zh-CN')} ~{' '}
                         {new Date(ex.endTime).toLocaleString('zh-CN')}
                       </div>
@@ -728,7 +743,7 @@ export default function TeacherExamsTab({
                       type="text"
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
-                      placeholder="例如：高一信息技术期中综合测试"
+                      placeholder="例如：高一信息技术/通用技术期中综合测试"
                       className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm"
                     />
                   </label>
@@ -794,12 +809,20 @@ export default function TeacherExamsTab({
                           className="h-8 px-2 border border-slate-300 rounded-lg bg-white"
                         >
                           <option value="">不限题型</option>
-                          <option value="word">Word</option>
-                          <option value="excel">Excel</option>
-                          <option value="web">网页制作</option>
-                          <option value="file">文件管理</option>
-                          <option value="python">Python 程序设计</option>
-                          <option value="database">数据库与 SQL</option>
+                          <optgroup label="高中信息技术">
+                            {SUBJECT_PACKS.it.questionTypes.map((t) => (
+                              <option key={t} value={t}>
+                                {TYPE_LABELS[t]}
+                              </option>
+                            ))}
+                          </optgroup>
+                          <optgroup label="高中通用技术">
+                            {SUBJECT_PACKS.gt.questionTypes.map((t) => (
+                              <option key={t} value={t}>
+                                {TYPE_LABELS[t]}
+                              </option>
+                            ))}
+                          </optgroup>
                         </select>
                         <select
                           value={autoDiff}
@@ -844,12 +867,20 @@ export default function TeacherExamsTab({
                           }
                           className="h-8 px-2 border border-slate-300 rounded-lg bg-white"
                         >
-                          <option value="word">Word</option>
-                          <option value="excel">Excel</option>
-                          <option value="web">网页制作</option>
-                          <option value="file">文件管理</option>
-                          <option value="python">Python 程序设计</option>
-                          <option value="database">数据库与 SQL</option>
+                          <optgroup label="高中信息技术">
+                            {SUBJECT_PACKS.it.questionTypes.map((t) => (
+                              <option key={t} value={t}>
+                                {TYPE_LABELS[t]}
+                              </option>
+                            ))}
+                          </optgroup>
+                          <optgroup label="高中通用技术">
+                            {SUBJECT_PACKS.gt.questionTypes.map((t) => (
+                              <option key={t} value={t}>
+                                {TYPE_LABELS[t]}
+                              </option>
+                            ))}
+                          </optgroup>
                         </select>
                         <input
                           type="text"

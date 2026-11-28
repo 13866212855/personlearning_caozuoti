@@ -15,11 +15,15 @@ export default function SsoEntryPage() {
   const router = useRouter();
   const [error, setError] = useState('');
   const [platformWebUrl, setPlatformWebUrl] = useState('');
+  const [siteTitle, setSiteTitle] = useState('高中会考实操练习与测评系统');
 
   useEffect(() => {
     let active = true;
     void fetchAuthConfig().then((cfg) => {
-      if (active) setPlatformWebUrl(cfg.platformWebUrl);
+      if (active) {
+        setPlatformWebUrl(cfg.platformWebUrl);
+        if (cfg.siteTitle) setSiteTitle(cfg.siteTitle);
+      }
     });
 
     (async () => {
@@ -69,7 +73,7 @@ export default function SsoEntryPage() {
             <BookOpen className="w-5 h-5" />
           </div>
           <h1 className="text-xl font-bold text-slate-900">
-            高中信息技术会考·操作题系统
+            {siteTitle}
           </h1>
           <p className="text-sm text-slate-500">
             {error ? '暂时无法从个性化学习平台进入' : '正在使用个性化学习平台账号进入...'}

@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { APP_CONFIG } from '../config';
 import { getDb } from '../db';
 import { gradeAnswerDeterministic } from '../grader';
+import { getSubjectForType, SUBJECT_PACKS } from '../../lib/subjects';
 import type {
   DifficultyLevel,
   Question,
@@ -458,8 +459,97 @@ initialState 与 referenceAnswer 的 JSON 结构必须严格为：
 - "sql_code_contains": { "patterns": ["SELECT", "WHERE", "ORDER BY"], "isRegex": false }
 - "sql_query_result": { "expectedColumns": ["name", "score"], "expectedRows": [["张三", 92]], "ignoreOrder": false }
 - "sql_table_state": { "tableName": "表名", "expectedRowCount": 3, "rowContains": [[3, "王五", 88]], "rowNotContains": [] }`,
+
+    sketch3view: `题型：通用技术 - 三视图与技术草图绘制（8x6网格）。
+initialState 与 referenceAnswer 的 JSON 结构必须严格为：
+{
+  "partTitle": "零件名称",
+  "gridCols": 8,
+  "gridRows": 6,
+  "givenLines": [{ "view": "front|top|left", "x1": 1, "y1": 1, "x2": 4, "y2": 1, "style": "solid" }],
+  "lines": [{ "view": "top", "x1": 4, "y1": 1, "x2": 4, "y2": 5, "style": "solid|dashed|center" }],
+  "dimensions": [{ "id": "d1", "view": "front", "label": "总长 L (mm)", "value": "60" }]
+}
+可用的 ruleType 与 params：
+- "sketch_line_exists": { "view": "front|top|left", "x1": 1, "y1": 3, "x2": 5, "y2": 3, "style": "solid|dashed|center" }
+- "sketch_line_not_exists": { "view": "left", "x1": 2, "y1": 2, "x2": 4, "y2": 2 }
+- "sketch_dimension_match": { "view": "front", "label": "总长", "expectedValue": "60" }`,
+
+    circuit: `题型：通用技术 - 电子控制电路连线与调试。
+initialState 与 referenceAnswer 的 JSON 结构必须严格为：
+{
+  "title": "实验电路名称",
+  "powered": false,
+  "lightLevel": 20,
+  "tempC": 25,
+  "components": [
+    { "id": "vcc", "type": "vcc", "label": "+5V 电源", "x": 70, "y": 70, "pins": ["out"] },
+    { "id": "ldr1", "type": "sensor_light", "label": "光敏传感器", "x": 200, "y": 170, "pins": ["a", "b"], "value": "dark<=40" },
+    { "id": "q1", "type": "transistor_npn", "label": "三极管 VT1", "x": 360, "y": 200, "pins": ["b", "c", "e"] },
+    { "id": "led1", "type": "led", "label": "照明 LED", "x": 480, "y": 70, "pins": ["a", "b"] },
+    { "id": "r1", "type": "resistor", "label": "限流电阻", "x": 480, "y": 165, "pins": ["a", "b"], "value": "1kΩ" },
+    { "id": "gnd", "type": "gnd", "label": "接地 GND", "x": 360, "y": 300, "pins": ["in"] }
+  ],
+  "wires": [{ "from": "vcc.out", "to": "led1.a" }]
+}
+可用的 ruleType 与 params：
+- "circuit_wire_connected": { "from": "ldr1.b", "to": "q1.b" }
+- "circuit_component_value": { "componentId": "sw1", "closed": true }
+- "circuit_sim_output": { "testPowered": true, "testLightLevel": 20, "activeOutputIds": ["led1"], "expectActive": true }`,
+
+    structure: `题型：通用技术 - 结构设计与受力稳定实验。
+initialState 与 referenceAnswer 的 JSON 结构必须严格为：
+{
+  "taskTitle": "结构任务名称",
+  "nodes": [{ "id": "A", "x": 70, "y": 200, "label": "左支座 A", "fixed": true }],
+  "baseMembers": [{ "from": "A", "to": "B", "material": "wood|aluminum|steel" }],
+  "members": [{ "from": "A", "to": "C", "material": "steel" }],
+  "jointType": "hinged|rigid",
+  "supportBaseWidth": 150,
+  "testLoadN": 260
+}
+可用的 ruleType 与 params：
+- "structure_member_exists": { "from": "A", "to": "C", "material": "steel" }
+- "structure_joint_style": { "jointType": "rigid", "minBaseWidth": 140 }
+- "structure_load_safe": { "minTriangles": 2, "minSafetyFactor": 1.2 }`,
+
+    control: `题型：通用技术 - 控制系统框图搭建。
+initialState 与 referenceAnswer 的 JSON 结构必须严格为：
+{
+  "systemTitle": "控制系统名称",
+  "mode": "open|closed",
+  "availableOptions": ["设定值", "比较器", "控制器", "执行器", "被控对象", "输出量", "传感器"],
+  "slots": { "input": "", "comparator": "", "controller": "", "actuator": "", "plant": "", "sensor": "", "output": "" },
+  "hasFeedbackEdge": false,
+  "disturbance": "干扰因素"
+}
+可用的 ruleType 与 params：
+- "control_mode_match": { "expectedMode": "closed|open" }
+- "control_slot_match": { "slot": "controller|actuator|plant|input|output|sensor|comparator", "expectedValue": "文本" }
+- "control_feedback_valid": { "expectFeedback": true }`,
+
+    craft: `题型：通用技术 - 工艺流程与游标卡尺测量。
+initialState 与 referenceAnswer 的 JSON 结构必须严格为：
+{
+  "taskTitle": "加工任务名称",
+  "availableSteps": ["划线", "锯割", "锉削", "钻孔"],
+  "orderedSteps": ["划线", "锯割", "锉削", "钻孔"],
+  "availableTools": ["划针与钢直尺", "手锯与台虎钳", "板锉", "台钻与平口钳"],
+  "selectedTools": { "划线": "划针与钢直尺" },
+  "safetyOptions": ["台钻钻孔时严禁佩戴手套", "戴线手套钻孔"],
+  "safetyChecks": ["台钻钻孔时严禁佩戴手套"],
+  "caliperMainMm": 23,
+  "caliperVernierDiv": 7,
+  "caliperReading": "23.35"
+}
+可用的 ruleType 与 params：
+- "craft_order_before": { "exactOrder": ["划线", "锯割", "锉削", "钻孔"] }
+- "craft_tool_match": { "step": "划线", "expectedTool": "划针与钢直尺" }
+- "craft_safety_checked": { "requiredChecks": ["台钻钻孔时严禁佩戴手套"], "forbiddenChecks": ["戴线手套钻孔"] }
+- "craft_reading_approx": { "expectedReading": 23.35, "tolerance": 0.03 }`,
   };
 
+  const subjectMeta = SUBJECT_PACKS[getSubjectForType(type)];
   const kpLine =
     knowledgePoints && knowledgePoints.length > 0
       ? `重点考查知识点：${knowledgePoints.join('、')}。`
@@ -474,7 +564,7 @@ initialState 与 referenceAnswer 的 JSON 结构必须严格为：
         ? '本题无需配图，请将 "needsImagePrompt" 设为 null。'
         : '如果题目需要配图（如 Word 插图或网页 img 图片），可填写 "needsImagePrompt"，否则设为 null；在没有自定义生成图片前，先用 "/api/seed-assets/heritage.svg" 作为占位路径。';
 
-  return `你是一名中国高中信息技术学业水平考试（会考）命题专家。请严格生成 1 道符合高中会考难度与风格的操作题。
+  return `你是一名中国${subjectMeta.examContext}命题专家。请严格生成 1 道符合高中会考难度与风格的操作题。
 要求：
 1. 难度：${difficulty}。${kpLine}${customLine}
 2. 步骤数量：${Math.max(3, Math.min(8, stepCount))} 步，每一步任务明确、无歧义、可被程序确定性判定。
@@ -732,6 +822,45 @@ export async function generateQuestionWithAi(params: {
         } else if (params.type === 'database') {
           if (!Array.isArray(s.tables)) s.tables = [];
           s.sql = String(s.sql || '');
+        } else if (params.type === 'sketch3view') {
+          s.gridCols = Number(s.gridCols || 8);
+          s.gridRows = Number(s.gridRows || 6);
+          if (!Array.isArray(s.givenLines)) s.givenLines = [];
+          if (!Array.isArray(s.lines)) s.lines = [];
+          if (!Array.isArray(s.dimensions)) s.dimensions = [];
+        } else if (params.type === 'circuit') {
+          if (!Array.isArray(s.components)) s.components = [];
+          if (!Array.isArray(s.wires)) s.wires = [];
+          s.powered = Boolean(s.powered);
+        } else if (params.type === 'structure') {
+          if (!Array.isArray(s.nodes)) s.nodes = [];
+          if (!Array.isArray(s.baseMembers)) s.baseMembers = [];
+          if (!Array.isArray(s.members)) s.members = [];
+          s.jointType = s.jointType === 'rigid' ? 'rigid' : 'hinged';
+          s.supportBaseWidth = Number(s.supportBaseWidth || 100);
+          s.testLoadN = Number(s.testLoadN || 200);
+        } else if (params.type === 'control') {
+          s.mode = s.mode === 'closed' ? 'closed' : 'open';
+          if (!Array.isArray(s.availableOptions)) s.availableOptions = [];
+          if (!s.slots || typeof s.slots !== 'object') {
+            s.slots = {
+              input: '',
+              comparator: '',
+              controller: '',
+              actuator: '',
+              plant: '',
+              sensor: '',
+              output: '',
+            };
+          }
+          s.hasFeedbackEdge = Boolean(s.hasFeedbackEdge);
+        } else if (params.type === 'craft') {
+          if (!Array.isArray(s.availableSteps)) s.availableSteps = [];
+          if (!Array.isArray(s.orderedSteps)) s.orderedSteps = [];
+          if (!Array.isArray(s.availableTools)) s.availableTools = [];
+          if (!s.selectedTools || typeof s.selectedTools !== 'object') s.selectedTools = {};
+          if (!Array.isArray(s.safetyOptions)) s.safetyOptions = [];
+          if (!Array.isArray(s.safetyChecks)) s.safetyChecks = [];
         }
         return s;
       };
@@ -758,6 +887,7 @@ export async function generateQuestionWithAi(params: {
       const now = new Date().toISOString();
       const question: Question = {
         id: `ai-${params.type}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        subjectId: getSubjectForType(params.type),
         title: parsed.title,
         type: params.type,
         difficulty: params.difficulty,
